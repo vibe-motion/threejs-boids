@@ -20,6 +20,11 @@ import {
 
 const STEP_FRAME_SECONDS = 1 / 60;
 const AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE = true;
+const COLLISION_DEBUG_SPHERE_SECONDS = 0.62;
+const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
+const COLLISION_DEBUG_RAY_DELAY_SECONDS = 0.04;
+const COLLISION_DEBUG_RAY_STEP_SECONDS = 0.16;
+const COLLISION_DEBUG_RAY_GROW_SECONDS = 0.13;
 const canvas = getRequiredElement("#scene");
 const renderer = createRenderer(canvas);
 const scene = createScene();
@@ -57,6 +62,12 @@ const obstacleRayColors = {
   clear: new THREE.Color(0x27e86f),
   hit: new THREE.Color(0xff3636),
 };
+const collisionDebugColors = {
+  sphere: new THREE.Color(0x47c7ff),
+  blocked: new THREE.Color(0xff4f4f),
+  wall: new THREE.Color(0xffa640),
+  selected: new THREE.Color(0x3cff84),
+};
 const cameraViewTarget = new THREE.Vector3(0, 0.8, 0);
 const cameraViewPresets = {
   x: {
@@ -92,12 +103,16 @@ const obstacleRayPose = {
 };
 const obstacleRayEnd = new THREE.Vector3();
 const collisionProbeDirection = new THREE.Vector3();
+const collisionDebugOverlay = createCollisionAvoidanceDebugOverlay(
+  simulation.rayDirections.length,
+);
 
 const lighting = addLighting(scene);
 lighting.setIntensity(readControlValue("light"));
 const aquariumEffects = addAquarium(scene);
 addWorldAxes(scene);
 scene.add(obstacleRay);
+scene.add(collisionDebugOverlay.group);
 const obstacleMeshes = addObstacles(scene, obstacles);
 applySimulationSettingsFromControls();
 bindControls();
@@ -213,6 +228,8 @@ function setSimulationPaused(paused) {
   simulationPaused = paused;
   if (!simulationPaused) {
     pendingSimulationSteps = 0;
+    collisionAvoidanceSnapshot = null;
+    collisionDebugOverlay.reset();
   }
   syncPlaybackControls();
 }
@@ -241,6 +258,7 @@ function setFishCount(count) {
   simulation.setCount(count);
   didAutoPauseForCollisionAvoidance = false;
   collisionAvoidanceSnapshot = null;
+  collisionDebugOverlay.reset();
   rebuildFishMesh();
 }
 
@@ -269,7 +287,9 @@ function animate() {
       traceIndex: headingDebugger?.traceIndex ?? fishConfig.highlightedIndex,
     });
     if (trace?.collisionAvoidanceSnapshot) {
-      collisionAvoidanceSnapshot = trace.collisionAvoidanceSnapshot;
+      collisionAvoidanceSnapshot = attachCollisionDebugVisualOrigin(
+        trace.collisionAvoidanceSnapshot,
+      );
     }
     updateFishInstances(fishMesh, simulation.fish);
     aquariumEffects.update(simulationTime);
@@ -285,8 +305,9 @@ function animate() {
   }
 
   updateObstacleRay();
-  updateCollisionAvoidanceDebugOverlay(
+  collisionDebugOverlay.update(
     simulationPaused ? collisionAvoidanceSnapshot : null,
+    frameDt,
   );
   cameraRig.update();
   cameraPanel.update();
@@ -308,9 +329,11 @@ function maybePauseForFirstCollisionAvoidance() {
     return false;
   }
 
-  collisionAvoidanceSnapshot = simulation.createCollisionAvoidanceSnapshot(
-    fish.position,
-    collisionProbeDirection,
+  collisionAvoidanceSnapshot = attachCollisionDebugVisualOrigin(
+    simulation.createCollisionAvoidanceSnapshot(
+      fish.position,
+      collisionProbeDirection,
+    ),
   );
   didAutoPauseForCollisionAvoidance = true;
   pendingSimulationSteps = 0;
@@ -318,9 +341,44 @@ function maybePauseForFirstCollisionAvoidance() {
   return true;
 }
 
-function updateCollisionAvoidanceDebugOverlay(snapshot) {
-  // Reserved for drawing the sampled candidate rays while the simulation is paused.
-  void snapshot;
+function attachCollisionDebugVisualOrigin(snapshot) {
+  snapshot.visualOrigin = snapshot.origin
+    .clone()
+    .addScaledVector(snapshot.forward, fishConfig.length / 2);
+  snapshot.visualSelectedIndex = -1;
+
+  for (const candidate of snapshot.candidateRays) {
+    const obstacleDistance = simulation.rayObstacleHitDistance(
+      snapshot.visualOrigin,
+      candidate.direction,
+      Infinity,
+    );
+    const visualEnd = snapshot.visualOrigin.clone().addScaledVector(
+      candidate.direction,
+      snapshot.maxDistance,
+    );
+
+    candidate.visualObstacleDistance = Number.isFinite(obstacleDistance)
+      ? obstacleDistance
+      : null;
+    candidate.visualHitsObstacle = obstacleDistance <= snapshot.maxDistance;
+    candidate.visualHitsWall = !simulation.isInsideAquarium(
+      visualEnd,
+      simulationSettings.boundsRadius,
+    );
+    candidate.visualIsClear = !candidate.visualHitsObstacle && !candidate.visualHitsWall;
+    candidate.visualIsSelected =
+      candidate.visualIsClear && snapshot.visualSelectedIndex === -1;
+
+    if (candidate.visualIsSelected) {
+      snapshot.visualSelectedIndex = candidate.index;
+      snapshot.visualSelectedDirection = candidate.direction.clone();
+    }
+  }
+
+  window.collisionAvoidanceSnapshot = snapshot;
+  logCollisionAvoidanceSnapshot(snapshot);
+  return snapshot;
 }
 
 function createObstacleRay() {
@@ -339,6 +397,260 @@ function createObstacleRay() {
   line.frustumCulled = false;
   line.renderOrder = 20;
   return line;
+}
+
+function createCollisionAvoidanceDebugOverlay(maxRayCount) {
+  const group = new THREE.Group();
+  group.visible = false;
+  group.renderOrder = 30;
+
+  const sphereMaterial = new THREE.MeshBasicMaterial({
+    color: collisionDebugColors.sphere,
+    transparent: true,
+    opacity: 0,
+    wireframe: true,
+    depthTest: false,
+  });
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 48, 24),
+    sphereMaterial,
+  );
+  sphere.renderOrder = 30;
+  group.add(sphere);
+
+  const rayPositions = new Float32Array(maxRayCount * 2 * 3);
+  const rayColors = new Float32Array(maxRayCount * 2 * 3);
+  const rayGeometry = new THREE.BufferGeometry();
+  rayGeometry.setAttribute("position", new THREE.BufferAttribute(rayPositions, 3));
+  rayGeometry.setAttribute("color", new THREE.BufferAttribute(rayColors, 3));
+  rayGeometry.setDrawRange(0, 0);
+  const rayMaterial = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.96,
+    depthTest: false,
+  });
+  const rays = new THREE.LineSegments(rayGeometry, rayMaterial);
+  rays.frustumCulled = false;
+  rays.renderOrder = 31;
+  group.add(rays);
+
+  const pointMaterial = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.98,
+    depthTest: false,
+  });
+  const points = new THREE.InstancedMesh(
+    new THREE.SphereGeometry(0.075, 12, 8),
+    pointMaterial,
+    maxRayCount,
+  );
+  points.count = 0;
+  points.frustumCulled = false;
+  points.renderOrder = 32;
+  group.add(points);
+
+  const matrix = new THREE.Matrix4();
+  const pointScale = new THREE.Vector3();
+  let activeSnapshot = null;
+  let elapsedSeconds = 0;
+  let loggedCandidateCount = 0;
+
+  return {
+    group,
+    reset() {
+      activeSnapshot = null;
+      elapsedSeconds = 0;
+      loggedCandidateCount = 0;
+      group.visible = false;
+      rayGeometry.setDrawRange(0, 0);
+      points.count = 0;
+    },
+    update(snapshot, dt) {
+      if (!snapshot) {
+        this.reset();
+        return;
+      }
+
+      if (snapshot !== activeSnapshot) {
+        activeSnapshot = snapshot;
+        elapsedSeconds = 0;
+        loggedCandidateCount = 0;
+      } else {
+        elapsedSeconds += dt;
+      }
+
+      group.visible = true;
+      group.position.copy(snapshot.visualOrigin ?? snapshot.origin);
+
+      const sphereProgress = easeOutCubic(
+        clamp01(elapsedSeconds / COLLISION_DEBUG_SPHERE_SECONDS),
+      );
+      sphere.scale.setScalar(snapshot.maxDistance * sphereProgress);
+      sphereMaterial.opacity = 0.18 * sphereProgress;
+
+      const rayElapsed = Math.max(0, elapsedSeconds - COLLISION_DEBUG_SPHERE_SECONDS);
+      const candidates = readVisibleCollisionCandidates(snapshot);
+      let visibleCount = 0;
+
+      for (let i = 0; i < candidates.length && i < maxRayCount; i += 1) {
+        const candidate = candidates[i];
+        const candidateElapsed = rayElapsed - i * COLLISION_DEBUG_RAY_STEP_SECONDS;
+        if (candidateElapsed <= 0) {
+          break;
+        }
+        if (i >= loggedCandidateCount) {
+          logCollisionCandidate(snapshot, candidate, i);
+        }
+
+        const pointProgress = easeOutBack(
+          clamp01(candidateElapsed / COLLISION_DEBUG_POINT_GROW_SECONDS),
+        );
+        const rayProgress = easeOutCubic(
+          clamp01(
+            (candidateElapsed - COLLISION_DEBUG_RAY_DELAY_SECONDS)
+              / COLLISION_DEBUG_RAY_GROW_SECONDS,
+          ),
+        );
+
+        const color = readCollisionCandidateColor(candidate);
+        const end = candidate.direction
+          .clone()
+          .multiplyScalar(snapshot.maxDistance * rayProgress);
+        writeLineSegment(rayPositions, visibleCount, end);
+        writeLineColor(rayColors, visibleCount, color);
+        writePointInstance(
+          points,
+          matrix,
+          pointScale,
+          visibleCount,
+          candidate,
+          snapshot.maxDistance,
+          pointProgress,
+        );
+        points.setColorAt(visibleCount, color);
+        visibleCount += 1;
+      }
+      loggedCandidateCount = Math.max(loggedCandidateCount, visibleCount);
+
+      rayGeometry.setDrawRange(0, visibleCount * 2);
+      rayGeometry.attributes.position.needsUpdate = true;
+      rayGeometry.attributes.color.needsUpdate = true;
+      points.count = visibleCount;
+      points.instanceMatrix.needsUpdate = true;
+      if (points.instanceColor) {
+        points.instanceColor.needsUpdate = true;
+      }
+    },
+  };
+}
+
+function readVisibleCollisionCandidates(snapshot) {
+  const selectedIndex = snapshot.visualSelectedIndex >= 0
+    ? snapshot.visualSelectedIndex
+    : snapshot.selectedIndex;
+  const endIndex = selectedIndex >= 0
+    ? selectedIndex
+    : snapshot.candidateRays.length - 1;
+  return snapshot.candidateRays.slice(0, endIndex + 1);
+}
+
+function writeLineSegment(positions, segmentIndex, end) {
+  const offset = segmentIndex * 6;
+  positions[offset] = 0;
+  positions[offset + 1] = 0;
+  positions[offset + 2] = 0;
+  positions[offset + 3] = end.x;
+  positions[offset + 4] = end.y;
+  positions[offset + 5] = end.z;
+}
+
+function writeLineColor(colors, segmentIndex, color) {
+  const offset = segmentIndex * 6;
+  colors[offset] = color.r;
+  colors[offset + 1] = color.g;
+  colors[offset + 2] = color.b;
+  colors[offset + 3] = color.r;
+  colors[offset + 4] = color.g;
+  colors[offset + 5] = color.b;
+}
+
+function writePointInstance(points, matrix, scale, index, candidate, radius, progress) {
+  const position = candidate.direction.clone().multiplyScalar(radius);
+  scale.setScalar(progress);
+  matrix.compose(position, points.quaternion, scale);
+  points.setMatrixAt(index, matrix);
+}
+
+function readCollisionCandidateColor(candidate) {
+  if (candidate.visualIsSelected) {
+    return collisionDebugColors.selected;
+  }
+  if (candidate.visualIsSelected === undefined && candidate.isSelected) {
+    return collisionDebugColors.selected;
+  }
+
+  const hitsWall = candidate.visualHitsWall ?? candidate.hitsWall;
+  return hitsWall
+    ? collisionDebugColors.wall
+    : collisionDebugColors.blocked;
+}
+
+function logCollisionAvoidanceSnapshot(snapshot) {
+  console.groupCollapsed("[collision-debug] pause snapshot");
+  console.table({
+    centerOrigin: vectorToDebugString(snapshot.origin),
+    visualOrigin: vectorToDebugString(snapshot.visualOrigin),
+    forward: vectorToDebugString(snapshot.forward),
+    maxDistance: snapshot.maxDistance,
+    algorithmSelectedIndex: snapshot.selectedIndex,
+    visualSelectedIndex: snapshot.visualSelectedIndex,
+  });
+  console.groupEnd();
+}
+
+function logCollisionCandidate(snapshot, candidate, visibleOrder) {
+  console.table({
+    visibleOrder,
+    candidateIndex: candidate.index,
+    algorithmHitsObstacle: candidate.hitsObstacle,
+    algorithmObstacleDistance: formatDebugDistance(candidate.obstacleDistance),
+    algorithmHitsWall: candidate.hitsWall,
+    algorithmSelected: candidate.isSelected,
+    visualHitsObstacle: candidate.visualHitsObstacle,
+    visualObstacleDistance: formatDebugDistance(candidate.visualObstacleDistance),
+    visualHitsWall: candidate.visualHitsWall,
+    visualSelected: candidate.visualIsSelected,
+    maxDistance: snapshot.maxDistance,
+    direction: vectorToDebugString(candidate.direction),
+  });
+}
+
+function vectorToDebugString(vector) {
+  return [
+    vector.x.toFixed(3),
+    vector.y.toFixed(3),
+    vector.z.toFixed(3),
+  ].join(", ");
+}
+
+function formatDebugDistance(distance) {
+  return distance === null ? "no hit" : Number(distance.toFixed(3));
+}
+
+function clamp01(value) {
+  return THREE.MathUtils.clamp(value, 0, 1);
+}
+
+function easeOutCubic(value) {
+  return 1 - Math.pow(1 - value, 3);
+}
+
+function easeOutBack(value) {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(value - 1, 3) + c1 * Math.pow(value - 1, 2);
 }
 
 function updateObstacleRay() {

@@ -321,11 +321,12 @@ export class FishSchoolSimulation {
         direction,
         this.settings.collisionAvoidDistance,
       );
-      const hitsObstacle = this.rayHitsObstacle(
+      const obstacleDistance = this.rayObstacleHitDistance(
         position,
         direction,
-        this.settings.collisionAvoidDistance,
+        Infinity,
       );
+      const hitsObstacle = obstacleDistance <= this.settings.collisionAvoidDistance;
       const hitsWall = !this.isInsideAquarium(end, this.settings.boundsRadius);
       const isClear = !hitsObstacle && !hitsWall;
       const isSelected = isClear && selectedIndex === -1;
@@ -342,6 +343,7 @@ export class FishSchoolSimulation {
           direction: direction.clone(),
           end: end.clone(),
           hitsObstacle,
+          obstacleDistance: Number.isFinite(obstacleDistance) ? obstacleDistance : null,
           hitsWall,
           isClear,
           isSelected,
@@ -363,24 +365,48 @@ export class FishSchoolSimulation {
   }
 
   rayHitsObstacle(origin, direction, maxDistance) {
+    return Number.isFinite(this.rayObstacleHitDistance(origin, direction, maxDistance));
+  }
+
+  rayObstacleHitDistance(origin, direction, maxDistance = Infinity) {
+    let nearestDistance = Infinity;
+
     for (const obstacle of this.obstacles) {
-      if (this.rayHitsSingleObstacle(origin, direction, maxDistance, obstacle)) {
-        return true;
+      const distance = this.raySingleObstacleHitDistance(
+        origin,
+        direction,
+        maxDistance,
+        obstacle,
+      );
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
       }
     }
 
-    return false;
+    return nearestDistance <= maxDistance ? nearestDistance : Infinity;
   }
 
   rayHitsSingleObstacle(origin, direction, maxDistance, obstacle) {
+    return Number.isFinite(
+      this.raySingleObstacleHitDistance(origin, direction, maxDistance, obstacle),
+    );
+  }
+
+  raySingleObstacleHitDistance(origin, direction, maxDistance, obstacle) {
     if ((obstacle.shape === "box" || obstacle.shape === "plate") && obstacle.size) {
-      return this.rayHitsBoxObstacle(origin, direction, maxDistance, obstacle);
+      return this.rayBoxObstacleHitDistance(origin, direction, maxDistance, obstacle);
     }
 
-    return this.rayHitsSphereObstacle(origin, direction, maxDistance, obstacle);
+    return this.raySphereObstacleHitDistance(origin, direction, maxDistance, obstacle);
   }
 
   rayHitsBoxObstacle(origin, direction, maxDistance, obstacle) {
+    return Number.isFinite(
+      this.rayBoxObstacleHitDistance(origin, direction, maxDistance, obstacle),
+    );
+  }
+
+  rayBoxObstacleHitDistance(origin, direction, maxDistance, obstacle) {
     const localOrigin = this.tmpVecC.subVectors(origin, obstacle.position);
     const localDirection = this.tmpVecD.copy(direction);
 
@@ -394,10 +420,23 @@ export class FishSchoolSimulation {
     const halfY = obstacle.size.y * 0.5 + inset;
     const halfZ = obstacle.size.z * 0.5 + inset;
 
-    return rayIntersectsExpandedBox(localOrigin, localDirection, halfX, halfY, halfZ, maxDistance);
+    return rayExpandedBoxHitDistance(
+      localOrigin,
+      localDirection,
+      halfX,
+      halfY,
+      halfZ,
+      maxDistance,
+    );
   }
 
   rayHitsSphereObstacle(origin, direction, maxDistance, obstacle) {
+    return Number.isFinite(
+      this.raySphereObstacleHitDistance(origin, direction, maxDistance, obstacle),
+    );
+  }
+
+  raySphereObstacleHitDistance(origin, direction, maxDistance, obstacle) {
     const radius = obstacle.radius + this.settings.boundsRadius;
     const offset = this.tmpVecC.subVectors(origin, obstacle.position);
     const b = offset.dot(direction);
@@ -412,7 +451,11 @@ export class FishSchoolSimulation {
     const near = -b - root;
     const far = -b + root;
 
-    return (near >= 0 && near <= maxDistance) || (far >= 0 && far <= maxDistance);
+    if (near >= 0 && near <= maxDistance) {
+      return near;
+    }
+
+    return far >= 0 && far <= maxDistance ? far : Infinity;
   }
 
   rotateAroundY(vector, angle) {
@@ -460,11 +503,17 @@ function normalizeFishCount(count, fallback) {
 }
 
 function rayIntersectsExpandedBox(origin, direction, halfX, halfY, halfZ, maxDistance) {
+  return Number.isFinite(
+    rayExpandedBoxHitDistance(origin, direction, halfX, halfY, halfZ, maxDistance),
+  );
+}
+
+function rayExpandedBoxHitDistance(origin, direction, halfX, halfY, halfZ, maxDistance) {
   let near = 0;
   let far = maxDistance;
 
   if (Math.abs(direction.x) < 0.000001) {
-    if (origin.x < -halfX || origin.x > halfX) return false;
+    if (origin.x < -halfX || origin.x > halfX) return Infinity;
   } else {
     const inverseDirection = 1 / direction.x;
     let axisNear = (-halfX - origin.x) * inverseDirection;
@@ -476,11 +525,11 @@ function rayIntersectsExpandedBox(origin, direction, halfX, halfY, halfZ, maxDis
     }
     near = Math.max(near, axisNear);
     far = Math.min(far, axisFar);
-    if (near > far) return false;
+    if (near > far) return Infinity;
   }
 
   if (Math.abs(direction.y) < 0.000001) {
-    if (origin.y < -halfY || origin.y > halfY) return false;
+    if (origin.y < -halfY || origin.y > halfY) return Infinity;
   } else {
     const inverseDirection = 1 / direction.y;
     let axisNear = (-halfY - origin.y) * inverseDirection;
@@ -492,11 +541,11 @@ function rayIntersectsExpandedBox(origin, direction, halfX, halfY, halfZ, maxDis
     }
     near = Math.max(near, axisNear);
     far = Math.min(far, axisFar);
-    if (near > far) return false;
+    if (near > far) return Infinity;
   }
 
   if (Math.abs(direction.z) < 0.000001) {
-    if (origin.z < -halfZ || origin.z > halfZ) return false;
+    if (origin.z < -halfZ || origin.z > halfZ) return Infinity;
   } else {
     const inverseDirection = 1 / direction.z;
     let axisNear = (-halfZ - origin.z) * inverseDirection;
@@ -508,8 +557,8 @@ function rayIntersectsExpandedBox(origin, direction, halfX, halfY, halfZ, maxDis
     }
     near = Math.max(near, axisNear);
     far = Math.min(far, axisFar);
-    if (near > far) return false;
+    if (near > far) return Infinity;
   }
 
-  return far >= 0 && near <= maxDistance;
+  return far >= 0 && near <= maxDistance ? near : Infinity;
 }
