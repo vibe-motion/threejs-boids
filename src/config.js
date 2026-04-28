@@ -10,7 +10,7 @@ export const fishConfig = {
   length: 0.8,
   radialSegments: 14,
   highlightedIndex: 0,
-  bodyColor: new THREE.Color(0x5fe3b1),
+  bodyColor: new THREE.Color(0x7c6dff),
   highlightedColor: new THREE.Color(0xfff000),
 };
 
