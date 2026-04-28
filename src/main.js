@@ -48,6 +48,8 @@ const simulationControlSettings = {
   avoidance: "avoidCollisionWeight",
   turnRate: "maxTurnRate",
 };
+const obstacleMoveStep = 0.32;
+const obstacleMoveKeys = new Set(["KeyW", "KeyA", "KeyS", "KeyD"]);
 
 let fishMesh = null;
 let simulationPaused = false;
@@ -57,11 +59,12 @@ let simulationTime = 0;
 const lighting = addLighting(scene);
 lighting.setIntensity(readControlValue("light"));
 const aquariumEffects = addAquarium(scene);
-addObstacles(scene, obstacles);
+const obstacleMeshes = addObstacles(scene, obstacles);
 applySimulationSettingsFromControls();
 bindControls();
 bindPlaybackControls();
 bindCameraToggle(cameraRig);
+bindObstacleKeyboardControls(obstacleMeshes);
 const cameraPanel = bindCameraPanel(cameraRig);
 simulation.reset(readControlValue("count"));
 rebuildFishMesh();
@@ -98,6 +101,54 @@ function bindPlaybackControls() {
   });
 
   syncPlaybackControls(toggleButton, stepButton);
+}
+
+function bindObstacleKeyboardControls(obstacleMeshes) {
+  const controlled = obstacleMeshes.find(
+    ({ obstacle }) => obstacle.shape === "plate",
+  );
+  if (!controlled) return;
+
+  window.addEventListener("keydown", (event) => {
+    if (!isObstacleMoveKey(event.code) || isEditingText(event.target)) {
+      return;
+    }
+
+    event.preventDefault();
+    moveObstacle(controlled, event.code);
+  });
+}
+
+function isObstacleMoveKey(code) {
+  return obstacleMoveKeys.has(code);
+}
+
+function moveObstacle({ obstacle, mesh }, code) {
+  const halfSize = obstacle.size?.clone().multiplyScalar(0.5) ?? new THREE.Vector3();
+  const yLimit = aquariumHalfSize.y - halfSize.y;
+  const zLimit = aquariumHalfSize.z - halfSize.z;
+
+  // WASD is defined from the +X aquarium side looking straight at the plate.
+  if (code === "KeyW") {
+    obstacle.position.y = Math.min(yLimit, obstacle.position.y + obstacleMoveStep);
+  } else if (code === "KeyS") {
+    obstacle.position.y = Math.max(-yLimit, obstacle.position.y - obstacleMoveStep);
+  } else if (code === "KeyA") {
+    obstacle.position.z = Math.min(zLimit, obstacle.position.z + obstacleMoveStep);
+  } else if (code === "KeyD") {
+    obstacle.position.z = Math.max(-zLimit, obstacle.position.z - obstacleMoveStep);
+  }
+
+  mesh.position.copy(obstacle.position);
+}
+
+function isEditingText(target) {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target?.isContentEditable
+  );
 }
 
 function syncPlaybackControls(toggleButton, stepButton) {

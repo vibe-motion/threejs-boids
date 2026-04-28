@@ -41,7 +41,7 @@ export const obstacles = [
     size: new THREE.Vector3(2.3, 2.3, 2.3),
   },
   {
-    position: new THREE.Vector3(-1.1, 2.2, 3.3),
+    position: new THREE.Vector3(-1.1, 2.2, 5.8),
     radius: 1.75,
     shape: "plate",
     size: new THREE.Vector3(0.24, 2.8, 3.4),

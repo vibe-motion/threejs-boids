@@ -28,7 +28,7 @@ export class FishSchoolSimulation {
     this.random = mulberry32(seed);
 
     for (let i = 0; i < targetCount; i += 1) {
-      this.fish.push(this.createFish());
+      this.fish.push(this.createFish(i));
     }
   }
 
@@ -41,11 +41,18 @@ export class FishSchoolSimulation {
     }
 
     while (this.fish.length < targetCount) {
-      this.fish.push(this.createFish());
+      this.fish.push(this.createFish(this.fish.length));
     }
   }
 
-  createFish() {
+  createFish(index = this.fish.length) {
+    if (index === 0) {
+      const collisionFish = this.createInitialCollisionFish();
+      if (collisionFish) {
+        return collisionFish;
+      }
+    }
+
     const position = randomPointInAquarium(this.random, this.aquariumHalfSize, 0.62);
     const direction = randomPointInSphere(this.random, 1).normalize();
     const speed = THREE.MathUtils.lerp(
@@ -57,6 +64,28 @@ export class FishSchoolSimulation {
     return {
       position,
       velocity: direction.multiplyScalar(speed),
+    };
+  }
+
+  createInitialCollisionFish() {
+    const plate = this.obstacles.find((obstacle) => obstacle.shape === "plate");
+    if (!plate?.size) {
+      return null;
+    }
+
+    const target = plate.position.clone();
+    target.y -= plate.size.y * 0.18;
+    target.z += plate.size.z * 0.18;
+
+    const startDistance = Math.min(5.2, this.aquariumHalfSize.x - plate.position.x - 0.7);
+    const position = target.clone();
+    position.x = plate.position.x + startDistance;
+
+    const speed = THREE.MathUtils.lerp(this.settings.minSpeed, this.settings.maxSpeed, 0.72);
+
+    return {
+      position,
+      velocity: new THREE.Vector3(-speed, 0, 0),
     };
   }
 
