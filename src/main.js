@@ -80,13 +80,20 @@ const cameraViewPresets = {
     up: new THREE.Vector3(0, 0, -1),
   },
   z: {
-    position: new THREE.Vector3(0, 1.4, 22),
+    position: new THREE.Vector3(8.8912, 2.2841, 15.9146),
     target: cameraViewTarget,
   },
   default: {
     position: new THREE.Vector3(0, 8.5, 20),
     target: cameraViewTarget,
   },
+};
+const INTRO_CAMERA_SPEED = 4.2;
+const COLLISION_DEBUG_AFTER_CAMERA_GAP_SECONDS = 0.28;
+const introCameraView = {
+  position: new THREE.Vector3(9.9348, 1.8843, 7.7737),
+  target: cameraViewTarget,
+  speed: INTRO_CAMERA_SPEED,
 };
 
 let fishMesh = null;
@@ -96,6 +103,7 @@ let simulationTime = 0;
 let playbackControls = null;
 let didAutoPauseForCollisionAvoidance = false;
 let collisionAvoidanceSnapshot = null;
+let collisionDebugRevealGapSeconds = 0;
 const obstacleRay = createObstacleRay();
 const obstacleRayPose = {
   position: new THREE.Vector3(),
@@ -120,7 +128,8 @@ bindPlaybackControls();
 bindCameraToggle(cameraRig);
 bindObstacleKeyboardControls(obstacleMeshes);
 bindCameraViewControls(cameraRig);
-cameraRig.setOrbitView(cameraViewPresets.x);
+cameraRig.setOrbitView(cameraViewPresets.z);
+cameraRig.flyToOrbitView(introCameraView);
 const cameraPanel = bindCameraPanel(cameraRig);
 simulation.reset(readControlValue("count"));
 rebuildFishMesh();
@@ -229,6 +238,7 @@ function setSimulationPaused(paused) {
   if (!simulationPaused) {
     pendingSimulationSteps = 0;
     collisionAvoidanceSnapshot = null;
+    collisionDebugRevealGapSeconds = 0;
     collisionDebugOverlay.reset();
   }
   syncPlaybackControls();
@@ -305,11 +315,13 @@ function animate() {
   }
 
   updateObstacleRay();
+  cameraRig.update(frameDt);
+  const collisionDebugSnapshot = simulationPaused ? collisionAvoidanceSnapshot : null;
   collisionDebugOverlay.update(
-    simulationPaused ? collisionAvoidanceSnapshot : null,
+    collisionDebugSnapshot,
     frameDt,
+    shouldRevealCollisionDebugRays(frameDt),
   );
-  cameraRig.update();
   cameraPanel.update();
   renderer.render(scene, cameraRig.activeCamera);
 }
@@ -337,7 +349,27 @@ function maybePauseForFirstCollisionAvoidance() {
   );
   didAutoPauseForCollisionAvoidance = true;
   pendingSimulationSteps = 0;
+  collisionDebugRevealGapSeconds = COLLISION_DEBUG_AFTER_CAMERA_GAP_SECONDS;
   setSimulationPaused(true);
+  return true;
+}
+
+function shouldRevealCollisionDebugRays(dt) {
+  if (!simulationPaused || !collisionAvoidanceSnapshot) {
+    collisionDebugRevealGapSeconds = 0;
+    return false;
+  }
+
+  if (cameraRig.isOrbitViewTransitionActive) {
+    collisionDebugRevealGapSeconds = COLLISION_DEBUG_AFTER_CAMERA_GAP_SECONDS;
+    return false;
+  }
+
+  if (collisionDebugRevealGapSeconds > 0) {
+    collisionDebugRevealGapSeconds = Math.max(0, collisionDebugRevealGapSeconds - dt);
+    return false;
+  }
+
   return true;
 }
 
@@ -455,6 +487,7 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
   const pointScale = new THREE.Vector3();
   let activeSnapshot = null;
   let elapsedSeconds = 0;
+  let rayElapsedSeconds = 0;
   let loggedCandidateCount = 0;
 
   return {
@@ -462,12 +495,13 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
     reset() {
       activeSnapshot = null;
       elapsedSeconds = 0;
+      rayElapsedSeconds = 0;
       loggedCandidateCount = 0;
       group.visible = false;
       rayGeometry.setDrawRange(0, 0);
       points.count = 0;
     },
-    update(snapshot, dt) {
+    update(snapshot, dt, revealRays = true) {
       if (!snapshot) {
         this.reset();
         return;
@@ -476,9 +510,16 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
       if (snapshot !== activeSnapshot) {
         activeSnapshot = snapshot;
         elapsedSeconds = 0;
+        rayElapsedSeconds = 0;
         loggedCandidateCount = 0;
       } else {
         elapsedSeconds += dt;
+      }
+      if (revealRays) {
+        rayElapsedSeconds += dt;
+      } else {
+        rayElapsedSeconds = 0;
+        loggedCandidateCount = 0;
       }
 
       group.visible = true;
@@ -490,7 +531,7 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
       sphere.scale.setScalar(snapshot.maxDistance * sphereProgress);
       sphereMaterial.opacity = 0.18 * sphereProgress;
 
-      const rayElapsed = Math.max(0, elapsedSeconds - COLLISION_DEBUG_SPHERE_SECONDS);
+      const rayElapsed = revealRays ? rayElapsedSeconds : 0;
       const candidates = readVisibleCollisionCandidates(snapshot);
       let visibleCount = 0;
 
