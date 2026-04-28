@@ -169,7 +169,10 @@ export function addObstacles(scene, obstacles) {
   const obstacleMeshes = [];
 
   for (const obstacle of obstacles) {
-    const mesh = new THREE.Mesh(createObstacleGeometry(obstacle), obstacleMaterial);
+    const mesh = new THREE.Mesh(
+      createObstacleGeometry(obstacle),
+      createObstacleMaterial(obstacle, obstacleMaterial),
+    );
     mesh.position.copy(obstacle.position);
     if (obstacle.rotationY) {
       mesh.rotation.y = obstacle.rotationY;
@@ -181,6 +184,64 @@ export function addObstacles(scene, obstacles) {
   }
 
   return obstacleMeshes;
+}
+
+function createObstacleMaterial(obstacle, fallbackMaterial) {
+  if (obstacle.shape !== "plate") {
+    return fallbackMaterial;
+  }
+
+  const faceMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map: createPlateCenterTexture(),
+    roughness: 0.52,
+    metalness: 0.08,
+  });
+  const edgeMaterial = new THREE.MeshStandardMaterial({
+    color: 0xb8584c,
+    roughness: 0.52,
+    metalness: 0.08,
+  });
+
+  return [
+    faceMaterial,
+    faceMaterial,
+    edgeMaterial,
+    edgeMaterial,
+    edgeMaterial,
+    edgeMaterial,
+  ];
+}
+
+function createPlateCenterTexture() {
+  const size = 512;
+  const lineWidth = 14;
+  const halfLineWidth = lineWidth / 2;
+  const center = size / 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#b8584c";
+  context.fillRect(0, 0, size, size);
+  context.fillStyle = "#fff5d6";
+  context.fillRect(center - halfLineWidth, 0, lineWidth, size);
+  context.fillRect(0, center - halfLineWidth, size, lineWidth);
+  context.font = "bold 112px sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText("1", center * 0.5, center * 0.5);
+  context.fillText("2", center * 1.5, center * 0.5);
+  context.fillText("3", center * 0.5, center * 1.5);
+  context.fillText("4", center * 1.5, center * 1.5);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function createObstacleGeometry(obstacle) {

@@ -5,6 +5,7 @@ import { aquariumHalfSize, fishConfig, obstacles, simulationSettings } from "./c
 import {
   createFishMesh,
   disposeFishMesh,
+  getFishHeadPose,
   updateFishInstances,
 } from "./fish-renderer.js";
 import { createHeadingDebugger } from "./heading-debugger.js";
@@ -51,6 +52,10 @@ const simulationControlSettings = {
 };
 const obstacleMoveStep = 0.32;
 const obstacleMoveKeys = new Set(["KeyW", "KeyA", "KeyS", "KeyD"]);
+const obstacleRayColors = {
+  clear: new THREE.Color(0x27e86f),
+  hit: new THREE.Color(0xff3636),
+};
 const cameraViewTarget = new THREE.Vector3(0, 0.8, 0);
 const cameraViewPresets = {
   x: {
@@ -76,11 +81,18 @@ let fishMesh = null;
 let simulationPaused = false;
 let pendingSimulationSteps = 0;
 let simulationTime = 0;
+const obstacleRay = createObstacleRay();
+const obstacleRayPose = {
+  position: new THREE.Vector3(),
+  direction: new THREE.Vector3(),
+};
+const obstacleRayEnd = new THREE.Vector3();
 
 const lighting = addLighting(scene);
 lighting.setIntensity(readControlValue("light"));
 const aquariumEffects = addAquarium(scene);
 addWorldAxes(scene);
+scene.add(obstacleRay);
 const obstacleMeshes = addObstacles(scene, obstacles);
 applySimulationSettingsFromControls();
 bindControls();
@@ -252,9 +264,73 @@ function animate() {
     );
   }
 
+  updateObstacleRay();
   cameraRig.update();
   cameraPanel.update();
   renderer.render(scene, cameraRig.activeCamera);
+}
+
+function createObstacleRay() {
+  const positions = new Float32Array(6);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+  const material = new THREE.LineBasicMaterial({
+    color: obstacleRayColors.clear,
+    transparent: true,
+    opacity: 0.95,
+    depthTest: false,
+  });
+
+  const line = new THREE.Line(geometry, material);
+  line.frustumCulled = false;
+  line.renderOrder = 20;
+  return line;
+}
+
+function updateObstacleRay() {
+  const fish = simulation.fish[fishConfig.highlightedIndex];
+  if (!fish) {
+    obstacleRay.visible = false;
+    return;
+  }
+
+  obstacleRay.visible = true;
+  getFishHeadPose(fish, obstacleRayPose);
+  const rayDistance = simulationSettings.collisionAvoidDistance;
+  obstacleRayEnd.copy(obstacleRayPose.position).addScaledVector(
+    obstacleRayPose.direction,
+    rayDistance,
+  );
+
+  const positionAttribute = obstacleRay.geometry.attributes.position;
+  positionAttribute.setXYZ(
+    0,
+    obstacleRayPose.position.x,
+    obstacleRayPose.position.y,
+    obstacleRayPose.position.z,
+  );
+  positionAttribute.setXYZ(
+    1,
+    obstacleRayEnd.x,
+    obstacleRayEnd.y,
+    obstacleRayEnd.z,
+  );
+  positionAttribute.needsUpdate = true;
+
+  const hitsObstacle = simulation.rayHitsObstacle(
+    obstacleRayPose.position,
+    obstacleRayPose.direction,
+    rayDistance,
+  );
+  const hitsWall = !simulation.isInsideAquarium(
+    obstacleRayEnd,
+    simulationSettings.boundsRadius,
+  );
+
+  obstacleRay.material.color.copy(
+    hitsObstacle || hitsWall ? obstacleRayColors.hit : obstacleRayColors.clear,
+  );
 }
 
 function getSimulationDelta(frameDt) {
