@@ -90,9 +90,10 @@ const cameraViewPresets = {
 };
 const INTRO_CAMERA_SPEED = 4.2;
 const COLLISION_DEBUG_AFTER_CAMERA_GAP_SECONDS = 0.28;
+const introCameraTarget = new THREE.Vector3(-4.3888, 0.8, 1.7316);
 const introCameraView = {
-  position: new THREE.Vector3(9.9348, 1.8843, 7.7737),
-  target: cameraViewTarget,
+  position: new THREE.Vector3(7.4135, 2.0878, 10.9675),
+  target: introCameraTarget,
   speed: INTRO_CAMERA_SPEED,
 };
 
