@@ -19,6 +19,7 @@ import {
 } from "./scene-setup.js";
 
 const STEP_FRAME_SECONDS = 1 / 60;
+const AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE = true;
 const canvas = getRequiredElement("#scene");
 const renderer = createRenderer(canvas);
 const scene = createScene();
@@ -81,12 +82,16 @@ let fishMesh = null;
 let simulationPaused = false;
 let pendingSimulationSteps = 0;
 let simulationTime = 0;
+let playbackControls = null;
+let didAutoPauseForCollisionAvoidance = false;
+let collisionAvoidanceSnapshot = null;
 const obstacleRay = createObstacleRay();
 const obstacleRayPose = {
   position: new THREE.Vector3(),
   direction: new THREE.Vector3(),
 };
 const obstacleRayEnd = new THREE.Vector3();
+const collisionProbeDirection = new THREE.Vector3();
 
 const lighting = addLighting(scene);
 lighting.setIntensity(readControlValue("light"));
@@ -121,13 +126,10 @@ function bindControls() {
 function bindPlaybackControls() {
   const toggleButton = getRequiredElement("#playback-toggle");
   const stepButton = getRequiredElement("#step-frame");
+  playbackControls = { toggleButton, stepButton };
 
   toggleButton.addEventListener("click", () => {
-    simulationPaused = !simulationPaused;
-    if (!simulationPaused) {
-      pendingSimulationSteps = 0;
-    }
-    syncPlaybackControls(toggleButton, stepButton);
+    setSimulationPaused(!simulationPaused);
   });
 
   stepButton.addEventListener("click", () => {
@@ -136,7 +138,7 @@ function bindPlaybackControls() {
     pendingSimulationSteps += 1;
   });
 
-  syncPlaybackControls(toggleButton, stepButton);
+  syncPlaybackControls();
 }
 
 function bindObstacleKeyboardControls(obstacleMeshes) {
@@ -198,10 +200,21 @@ function isEditingText(target) {
   );
 }
 
-function syncPlaybackControls(toggleButton, stepButton) {
+function syncPlaybackControls() {
+  if (!playbackControls) return;
+
+  const { toggleButton, stepButton } = playbackControls;
   toggleButton.textContent = simulationPaused ? "Resume" : "Pause";
   toggleButton.setAttribute("aria-pressed", String(simulationPaused));
   stepButton.disabled = !simulationPaused;
+}
+
+function setSimulationPaused(paused) {
+  simulationPaused = paused;
+  if (!simulationPaused) {
+    pendingSimulationSteps = 0;
+  }
+  syncPlaybackControls();
 }
 
 function applyControlChange(key) {
@@ -226,6 +239,8 @@ function applySimulationSettingsFromControls() {
 
 function setFishCount(count) {
   simulation.setCount(count);
+  didAutoPauseForCollisionAvoidance = false;
+  collisionAvoidanceSnapshot = null;
   rebuildFishMesh();
 }
 
@@ -243,14 +258,19 @@ function rebuildFishMesh() {
 
 function animate() {
   const frameDt = Math.min(clock.getDelta(), 1 / 30);
-  const simulationDt = getSimulationDelta(frameDt);
+  const simulationDt = maybePauseForFirstCollisionAvoidance()
+    ? 0
+    : getSimulationDelta(frameDt);
   let trace = null;
 
   if (simulationDt > 0) {
     simulationTime += simulationDt;
     trace = simulation.update(simulationDt, {
-      traceIndex: headingDebugger?.traceIndex,
+      traceIndex: headingDebugger?.traceIndex ?? fishConfig.highlightedIndex,
     });
+    if (trace?.collisionAvoidanceSnapshot) {
+      collisionAvoidanceSnapshot = trace.collisionAvoidanceSnapshot;
+    }
     updateFishInstances(fishMesh, simulation.fish);
     aquariumEffects.update(simulationTime);
     headingDebugger?.sample({
@@ -265,9 +285,42 @@ function animate() {
   }
 
   updateObstacleRay();
+  updateCollisionAvoidanceDebugOverlay(
+    simulationPaused ? collisionAvoidanceSnapshot : null,
+  );
   cameraRig.update();
   cameraPanel.update();
   renderer.render(scene, cameraRig.activeCamera);
+}
+
+function maybePauseForFirstCollisionAvoidance() {
+  if (!AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE || didAutoPauseForCollisionAvoidance) {
+    return false;
+  }
+
+  const fish = simulation.fish[fishConfig.highlightedIndex];
+  if (!fish) {
+    return false;
+  }
+
+  collisionProbeDirection.copy(fish.velocity).normalize();
+  if (!simulation.isHeadingForCollision(fish.position, collisionProbeDirection)) {
+    return false;
+  }
+
+  collisionAvoidanceSnapshot = simulation.createCollisionAvoidanceSnapshot(
+    fish.position,
+    collisionProbeDirection,
+  );
+  didAutoPauseForCollisionAvoidance = true;
+  pendingSimulationSteps = 0;
+  setSimulationPaused(true);
+  return true;
+}
+
+function updateCollisionAvoidanceDebugOverlay(snapshot) {
+  // Reserved for drawing the sampled candidate rays while the simulation is paused.
+  void snapshot;
 }
 
 function createObstacleRay() {

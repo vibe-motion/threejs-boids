@@ -110,6 +110,7 @@ export class FishSchoolSimulation {
       let neighborCount = 0;
       let collisionAvoidanceActive = false;
       let boundaryAvoidanceActive = false;
+      let collisionAvoidanceSnapshot = null;
 
       for (let j = 0; j < this.fish.length; j += 1) {
         if (i === j) continue;
@@ -161,7 +162,14 @@ export class FishSchoolSimulation {
       const forward = this.tmpVecB.copy(fish.velocity).normalize();
       if (this.isHeadingForCollision(fish.position, forward)) {
         collisionAvoidanceActive = true;
-        const clearDirection = this.obstacleRays(fish.position, forward);
+        if (components) {
+          collisionAvoidanceSnapshot = this.createCollisionAvoidanceSnapshot(
+            fish.position,
+            forward,
+          );
+        }
+        const clearDirection = collisionAvoidanceSnapshot?.selectedDirection
+          ?? this.obstacleRays(fish.position, forward);
         const obstacle = this.steerTowards(
           clearDirection,
           fish.velocity,
@@ -207,6 +215,7 @@ export class FishSchoolSimulation {
           neighborCount,
           collisionAvoidanceActive,
           boundaryAvoidanceActive,
+          collisionAvoidanceSnapshot,
           previousVelocity: fish.velocity.clone(),
           nextVelocity: velocity.clone(),
         };
@@ -269,9 +278,41 @@ export class FishSchoolSimulation {
   }
 
   obstacleRays(position, forward) {
-    this.tmpQuat.setFromUnitVectors(this.forwardAxis, forward);
+    return this.findClearObstacleDirection(position, forward).direction;
+  }
 
-    for (const localDirection of this.rayDirections) {
+  createCollisionAvoidanceSnapshot(position, forward) {
+    const candidateRays = [];
+    const forwardDirection = forward.clone().normalize();
+    const result = this.findClearObstacleDirection(
+      position,
+      forwardDirection,
+      candidateRays,
+    );
+    const maxDistance = this.settings.collisionAvoidDistance;
+    const forwardEnd = position.clone().addScaledVector(forwardDirection, maxDistance);
+
+    return {
+      origin: position.clone(),
+      forward: forwardDirection,
+      forwardEnd,
+      maxDistance,
+      headingHitsObstacle: this.rayHitsObstacle(position, forwardDirection, maxDistance),
+      headingHitsWall: !this.isInsideAquarium(forwardEnd, this.settings.boundsRadius),
+      candidateRays,
+      selectedIndex: result.index,
+      selectedDirection: result.direction,
+    };
+  }
+
+  findClearObstacleDirection(position, forward, candidateRays = null) {
+    const forwardDirection = forward.clone().normalize();
+    let selectedIndex = -1;
+    let selectedDirection = null;
+    this.tmpQuat.setFromUnitVectors(this.forwardAxis, forwardDirection);
+
+    for (let index = 0; index < this.rayDirections.length; index += 1) {
+      const localDirection = this.rayDirections[index];
       const direction = this.tmpVecA
         .copy(localDirection)
         .applyQuaternion(this.tmpQuat)
@@ -280,15 +321,45 @@ export class FishSchoolSimulation {
         direction,
         this.settings.collisionAvoidDistance,
       );
+      const hitsObstacle = this.rayHitsObstacle(
+        position,
+        direction,
+        this.settings.collisionAvoidDistance,
+      );
+      const hitsWall = !this.isInsideAquarium(end, this.settings.boundsRadius);
+      const isClear = !hitsObstacle && !hitsWall;
+      const isSelected = isClear && selectedIndex === -1;
 
-      if (!this.rayHitsObstacle(position, direction, this.settings.collisionAvoidDistance)) {
-        if (this.isInsideAquarium(end, this.settings.boundsRadius)) {
-          return direction.clone();
-        }
+      if (isSelected) {
+        selectedIndex = index;
+        selectedDirection = direction.clone();
+      }
+
+      if (candidateRays) {
+        candidateRays.push({
+          index,
+          localDirection: localDirection.clone(),
+          direction: direction.clone(),
+          end: end.clone(),
+          hitsObstacle,
+          hitsWall,
+          isClear,
+          isSelected,
+        });
+      }
+
+      if (isSelected && !candidateRays) {
+        return {
+          index,
+          direction: direction.clone(),
+        };
       }
     }
 
-    return forward.clone();
+    return {
+      index: selectedIndex,
+      direction: selectedDirection ?? forwardDirection,
+    };
   }
 
   rayHitsObstacle(origin, direction, maxDistance) {
