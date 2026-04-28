@@ -12,6 +12,7 @@ import {
   addLighting,
   addObstacles,
   addAquarium,
+  addWorldAxes,
   createRenderer,
   createScene,
 } from "./scene-setup.js";
@@ -50,6 +51,26 @@ const simulationControlSettings = {
 };
 const obstacleMoveStep = 0.32;
 const obstacleMoveKeys = new Set(["KeyW", "KeyA", "KeyS", "KeyD"]);
+const cameraViewTarget = new THREE.Vector3(0, 0.8, 0);
+const cameraViewPresets = {
+  x: {
+    position: new THREE.Vector3(21.3715, 1.4141, 1.4742),
+    target: cameraViewTarget,
+  },
+  y: {
+    position: new THREE.Vector3(0, 22, 0),
+    target: cameraViewTarget,
+    up: new THREE.Vector3(0, 0, -1),
+  },
+  z: {
+    position: new THREE.Vector3(0, 1.4, 22),
+    target: cameraViewTarget,
+  },
+  default: {
+    position: new THREE.Vector3(0, 8.5, 20),
+    target: cameraViewTarget,
+  },
+};
 
 let fishMesh = null;
 let simulationPaused = false;
@@ -59,12 +80,15 @@ let simulationTime = 0;
 const lighting = addLighting(scene);
 lighting.setIntensity(readControlValue("light"));
 const aquariumEffects = addAquarium(scene);
+addWorldAxes(scene);
 const obstacleMeshes = addObstacles(scene, obstacles);
 applySimulationSettingsFromControls();
 bindControls();
 bindPlaybackControls();
 bindCameraToggle(cameraRig);
 bindObstacleKeyboardControls(obstacleMeshes);
+bindCameraViewControls(cameraRig);
+cameraRig.setOrbitView(cameraViewPresets.x);
 const cameraPanel = bindCameraPanel(cameraRig);
 simulation.reset(readControlValue("count"));
 rebuildFishMesh();
@@ -117,6 +141,17 @@ function bindObstacleKeyboardControls(obstacleMeshes) {
     event.preventDefault();
     moveObstacle(controlled, event.code);
   });
+}
+
+function bindCameraViewControls(rig) {
+  for (const button of document.querySelectorAll("[data-camera-view]")) {
+    button.addEventListener("click", () => {
+      const preset = cameraViewPresets[button.dataset.cameraView];
+      if (!preset) return;
+
+      rig.setOrbitView(preset);
+    });
+  }
 }
 
 function isObstacleMoveKey(code) {

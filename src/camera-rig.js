@@ -50,6 +50,16 @@ export function createCameraRig(renderer) {
       controls.enabled = mode === CAMERA_MODE.orbit;
     },
 
+    setOrbitView({ position, target: viewTarget = controls.target, up: viewUp = worldUp }) {
+      mode = CAMERA_MODE.orbit;
+      controls.enabled = true;
+      controls.target.copy(viewTarget);
+      orbitCamera.up.copy(viewUp);
+      orbitCamera.position.copy(position);
+      orbitCamera.lookAt(controls.target);
+      controls.update();
+    },
+
     update() {
       if (controls.enabled) {
         controls.update();

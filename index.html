@@ -27,8 +27,8 @@
 
         <label>
           Fish
-          <input id="count" type="range" min="1" max="260" step="1" value="60" />
-          <output id="count-value">60</output>
+          <input id="count" type="range" min="1" max="1" step="1" value="1" />
+          <output id="count-value">1</output>
         </label>
 
         <label>
@@ -63,6 +63,13 @@
       </section>
 
       <section class="panel camera-panel" aria-label="Camera controls">
+        <div class="camera-view-controls" aria-label="Camera view presets">
+          <button type="button" data-camera-view="x">X</button>
+          <button type="button" data-camera-view="y">Y</button>
+          <button type="button" data-camera-view="z">Z</button>
+          <button type="button" data-camera-view="default">Default</button>
+        </div>
+
         <div class="panel-header">
           <button id="copy-camera-json" type="button">Copy JSON</button>
         </div>

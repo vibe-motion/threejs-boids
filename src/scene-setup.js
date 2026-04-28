@@ -122,12 +122,51 @@ export function addAquarium(scene) {
   };
 }
 
+export function addWorldAxes(scene) {
+  const axes = [
+    { label: "x", color: 0x9b4b4b, direction: new THREE.Vector3(1, 0, 0) },
+    { label: "y", color: 0x5d8f58, direction: new THREE.Vector3(0, 1, 0) },
+    { label: "z", color: 0x4f6f9d, direction: new THREE.Vector3(0, 0, 1) },
+  ];
+  const length = 2.45;
+  const labelOffset = 0.28;
+  const origin = new THREE.Vector3();
+
+  for (const axis of axes) {
+    const end = axis.direction.clone().multiplyScalar(length);
+    const material = new THREE.LineBasicMaterial({
+      color: axis.color,
+      transparent: true,
+      opacity: 0.46,
+    });
+    const geometry = new THREE.BufferGeometry().setFromPoints([origin, end]);
+    scene.add(new THREE.Line(geometry, material));
+
+    const arrow = new THREE.Mesh(
+      new THREE.ConeGeometry(0.035, 0.16, 10),
+      new THREE.MeshBasicMaterial({
+        color: axis.color,
+        transparent: true,
+        opacity: 0.5,
+      }),
+    );
+    arrow.position.copy(axis.direction).multiplyScalar(length);
+    arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis.direction);
+    scene.add(arrow);
+
+    const label = createAxisLabel(axis.label, axis.color);
+    label.position.copy(axis.direction).multiplyScalar(length + labelOffset);
+    scene.add(label);
+  }
+}
+
 export function addObstacles(scene, obstacles) {
   const obstacleMaterial = new THREE.MeshStandardMaterial({
     color: 0xb8584c,
     roughness: 0.52,
     metalness: 0.08,
   });
+  const obstacleMeshes = [];
 
   for (const obstacle of obstacles) {
     const mesh = new THREE.Mesh(createObstacleGeometry(obstacle), obstacleMaterial);
@@ -138,7 +177,10 @@ export function addObstacles(scene, obstacles) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
+    obstacleMeshes.push({ obstacle, mesh });
   }
+
+  return obstacleMeshes;
 }
 
 function createObstacleGeometry(obstacle) {
@@ -147,6 +189,34 @@ function createObstacleGeometry(obstacle) {
   }
 
   return new THREE.SphereGeometry(obstacle.radius, 32, 18);
+}
+
+function createAxisLabel(text, color) {
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const context = canvas.getContext("2d");
+  context.font = "32px sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+  context.globalAlpha = 0.72;
+  context.fillText(text, size / 2, size / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(0.38, 0.38, 1);
+  return sprite;
 }
 
 function addBubbleColumns(scene) {

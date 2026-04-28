@@ -77,9 +77,8 @@ export class FishSchoolSimulation {
     target.y -= plate.size.y * 0.18;
     target.z += plate.size.z * 0.18;
 
-    const startDistance = Math.min(5.2, this.aquariumHalfSize.x - plate.position.x - 0.7);
     const position = target.clone();
-    position.x = plate.position.x + startDistance;
+    position.x = 5;
 
     const speed = THREE.MathUtils.lerp(this.settings.minSpeed, this.settings.maxSpeed, 0.72);
 

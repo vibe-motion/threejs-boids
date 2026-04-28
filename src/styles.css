@@ -142,6 +142,24 @@ input[type="range"] {
   overflow: auto;
 }
 
+.camera-view-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 42px) 72px;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.camera-view-controls button {
+  min-width: 42px;
+  min-height: 32px;
+  padding: 0;
+  background: rgb(49 90 99 / 72%);
+}
+
+.camera-view-controls button:hover {
+  background: #3e707b;
+}
+
 .camera-panel .panel-header {
   margin-bottom: 0;
 }

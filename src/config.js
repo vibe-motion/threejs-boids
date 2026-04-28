@@ -6,8 +6,8 @@ export const aquariumFloorY = -aquariumHalfSize.y;
 export const waterLevelY = aquariumHalfSize.y - 0.72;
 
 export const fishConfig = {
-  radius: 0.13,
-  length: 0.58,
+  radius: 0.18,
+  length: 0.8,
   radialSegments: 14,
   highlightedIndex: 0,
   bodyColor: new THREE.Color(0x5fe3b1),
@@ -33,19 +33,10 @@ export const simulationSettings = {
 };
 
 export const obstacles = [
-  { position: new THREE.Vector3(-4.2, -0.4, -2.4), radius: 1.25 },
   {
-    position: new THREE.Vector3(3.8, 1.2, -1.2),
-    radius: 1.45,
-    shape: "box",
-    size: new THREE.Vector3(2.3, 2.3, 2.3),
-  },
-  {
-    position: new THREE.Vector3(-1.1, 2.2, 5.8),
+    position: new THREE.Vector3(-6, 2, 2),
     radius: 1.75,
     shape: "plate",
     size: new THREE.Vector3(0.24, 2.8, 3.4),
   },
-  { position: new THREE.Vector3(2.1, -2.7, 3.1), radius: 1.25 },
-  { position: new THREE.Vector3(0, 0, 0), radius: 1.65 },
 ];
