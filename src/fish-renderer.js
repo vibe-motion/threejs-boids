@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { fishConfig } from "./config.js";
+import { aquariumHalfSize, fishConfig } from "./config.js";
 
 const upAxis = new THREE.Vector3(0, 1, 0);
 const unitScale = new THREE.Vector3(1, 1, 1);
@@ -18,6 +18,10 @@ export function createFishMesh(count) {
 
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.boundingSphere = new THREE.Sphere(
+    new THREE.Vector3(),
+    aquariumHalfSize.length() + fishConfig.length,
+  );
   mesh.castShadow = true;
 
   for (let i = 0; i < count; i += 1) {

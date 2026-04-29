@@ -25,6 +25,32 @@ const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
 const COLLISION_DEBUG_RAY_DELAY_SECONDS = 0.04;
 const COLLISION_DEBUG_RAY_STEP_SECONDS = 0.16;
 const COLLISION_DEBUG_RAY_GROW_SECONDS = 0.13;
+const DISPLAY_MODES = {
+  1: {
+    uiPanels: true,
+    sceneObjects: true,
+  },
+  2: {
+    uiPanels: false,
+    sceneObjects: true,
+  },
+};
+const DEFAULT_DISPLAY_MODE = "1";
+const textInputTypes = new Set([
+  "date",
+  "datetime-local",
+  "email",
+  "month",
+  "number",
+  "password",
+  "search",
+  "tel",
+  "text",
+  "time",
+  "url",
+  "week",
+]);
+const app = getRequiredElement("#app");
 const canvas = getRequiredElement("#scene");
 const renderer = createRenderer(canvas);
 const scene = createScene();
@@ -126,9 +152,11 @@ const obstacleMeshes = addObstacles(scene, obstacles);
 applySimulationSettingsFromControls();
 bindControls();
 bindPlaybackControls();
+bindDisplayModeControls();
 bindCameraToggle(cameraRig);
 bindObstacleKeyboardControls(obstacleMeshes);
 bindCameraViewControls(cameraRig);
+applyDisplayMode(DEFAULT_DISPLAY_MODE);
 cameraRig.setOrbitView(cameraViewPresets.z);
 cameraRig.flyToOrbitView(introCameraView);
 const cameraPanel = bindCameraPanel(cameraRig);
@@ -164,6 +192,48 @@ function bindPlaybackControls() {
   });
 
   syncPlaybackControls();
+}
+
+function bindDisplayModeControls() {
+  window.addEventListener("keydown", (event) => {
+    if (event.repeat || isEditingText(event.target)) {
+      return;
+    }
+
+    const modeKey = readDisplayModeKey(event);
+    if (!modeKey || !DISPLAY_MODES[modeKey]) {
+      return;
+    }
+
+    event.preventDefault();
+    applyDisplayMode(modeKey);
+  });
+}
+
+function readDisplayModeKey(event) {
+  if (/^[1-9]$/.test(event.key)) {
+    return event.key;
+  }
+
+  const digitMatch = event.code.match(/^(?:Digit|Numpad)([1-9])$/);
+  return digitMatch?.[1] ?? null;
+}
+
+function applyDisplayMode(modeKey) {
+  const mode = DISPLAY_MODES[modeKey];
+  if (!mode) return;
+
+  app.dataset.displayMode = modeKey;
+  applyUIPanelsVisibility(mode.uiPanels);
+  applySceneObjectsVisibility(mode.sceneObjects);
+}
+
+function applyUIPanelsVisibility(visible) {
+  app.dataset.uiPanels = visible ? "visible" : "hidden";
+}
+
+function applySceneObjectsVisibility(visible) {
+  scene.visible = visible;
 }
 
 function bindObstacleKeyboardControls(obstacleMeshes) {
@@ -218,7 +288,7 @@ function moveObstacle({ obstacle, mesh }, code) {
 
 function isEditingText(target) {
   return (
-    target instanceof HTMLInputElement ||
+    (target instanceof HTMLInputElement && textInputTypes.has(target.type)) ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
     target?.isContentEditable
