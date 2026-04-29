@@ -45,7 +45,7 @@ const DISPLAY_MODES = {
     sceneObjects: true,
   },
 };
-const DEFAULT_DISPLAY_MODE = "3";
+const DEFAULT_DISPLAY_MODE = "2";
 const textInputTypes = new Set([
   "date",
   "datetime-local",

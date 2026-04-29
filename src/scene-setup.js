@@ -6,8 +6,12 @@ export function createRenderer(canvas) {
     throw new Error("A canvas element is required to create the renderer.");
   }
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    powerPreference: "high-performance",
+  });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
