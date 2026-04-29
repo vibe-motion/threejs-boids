@@ -20,7 +20,7 @@ import {
 
 const STEP_FRAME_SECONDS = 1 / 60;
 const AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE = true;
-const COLLISION_DEBUG_SPHERE_SECONDS = 0.62;
+const COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS = 0.5;
 const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
 const COLLISION_DEBUG_RAY_DELAY_SECONDS = 0.04;
 const COLLISION_DEBUG_RAY_STEP_SECONDS = 0.16;
@@ -99,7 +99,6 @@ const obstacleRayColors = {
   hit: new THREE.Color(0xff3636),
 };
 const collisionDebugColors = {
-  sphere: new THREE.Color(0xffffff),
   point: new THREE.Color(0xffffff),
   blocked: new THREE.Color(0xff4f4f),
   wall: new THREE.Color(0xffa640),
@@ -126,7 +125,6 @@ const cameraViewPresets = {
   },
 };
 const INTRO_CAMERA_SPEED = 4.2;
-const COLLISION_DEBUG_AFTER_CAMERA_GAP_SECONDS = 0.28;
 const introCameraTarget = new THREE.Vector3(-4.3888, 0.8, 1.7316);
 const introCameraView = {
   position: new THREE.Vector3(7.4135, 2.0878, 10.9675),
@@ -452,7 +450,7 @@ function maybePauseForFirstCollisionAvoidance() {
   );
   didAutoPauseForCollisionAvoidance = true;
   pendingSimulationSteps = 0;
-  collisionDebugRevealGapSeconds = COLLISION_DEBUG_AFTER_CAMERA_GAP_SECONDS;
+  collisionDebugRevealGapSeconds = COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS;
   setSimulationPaused(true);
   return true;
 }
@@ -464,7 +462,7 @@ function shouldRevealCollisionDebugRays(dt) {
   }
 
   if (cameraRig.isOrbitViewTransitionActive) {
-    collisionDebugRevealGapSeconds = COLLISION_DEBUG_AFTER_CAMERA_GAP_SECONDS;
+    collisionDebugRevealGapSeconds = COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS;
     return false;
   }
 
@@ -539,20 +537,6 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
   group.visible = false;
   group.renderOrder = 30;
 
-  const sphereMaterial = new THREE.MeshBasicMaterial({
-    color: collisionDebugColors.sphere,
-    transparent: true,
-    opacity: 0,
-    wireframe: true,
-    depthTest: false,
-  });
-  const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 48, 24),
-    sphereMaterial,
-  );
-  sphere.renderOrder = 30;
-  group.add(sphere);
-
   const rayPositions = new Float32Array(maxRayCount * 2 * 3);
   const rayColors = new Float32Array(maxRayCount * 2 * 3);
   const rayGeometry = new THREE.BufferGeometry();
@@ -601,7 +585,6 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
   const matrix = new THREE.Matrix4();
   const pointScale = new THREE.Vector3();
   let activeSnapshot = null;
-  let elapsedSeconds = 0;
   let rayElapsedSeconds = 0;
   let loggedCandidateCount = 0;
 
@@ -609,7 +592,6 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
     group,
     reset() {
       activeSnapshot = null;
-      elapsedSeconds = 0;
       rayElapsedSeconds = 0;
       loggedCandidateCount = 0;
       group.visible = false;
@@ -624,11 +606,8 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
 
       if (snapshot !== activeSnapshot) {
         activeSnapshot = snapshot;
-        elapsedSeconds = 0;
         rayElapsedSeconds = 0;
         loggedCandidateCount = 0;
-      } else {
-        elapsedSeconds += dt;
       }
       if (revealRays) {
         rayElapsedSeconds += dt;
@@ -639,12 +618,6 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
 
       group.visible = true;
       group.position.copy(snapshot.visualOrigin ?? snapshot.origin);
-
-      const sphereProgress = easeOutCubic(
-        clamp01(elapsedSeconds / COLLISION_DEBUG_SPHERE_SECONDS),
-      );
-      sphere.scale.setScalar(snapshot.maxDistance * sphereProgress);
-      sphereMaterial.opacity = 0.18 * sphereProgress;
 
       const rayElapsed = revealRays ? rayElapsedSeconds : 0;
       const candidates = readVisibleCollisionCandidates(snapshot);
