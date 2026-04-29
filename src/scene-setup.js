@@ -122,6 +122,7 @@ export function addAquarium(scene) {
 }
 
 export function addWorldAxes(scene) {
+  const group = new THREE.Group();
   const axes = [
     { label: "x", color: 0x9b4b4b, direction: new THREE.Vector3(1, 0, 0) },
     { label: "y", color: 0x5d8f58, direction: new THREE.Vector3(0, 1, 0) },
@@ -139,7 +140,7 @@ export function addWorldAxes(scene) {
       opacity: 0.46,
     });
     const geometry = new THREE.BufferGeometry().setFromPoints([origin, end]);
-    scene.add(new THREE.Line(geometry, material));
+    group.add(new THREE.Line(geometry, material));
 
     const arrow = new THREE.Mesh(
       new THREE.ConeGeometry(0.035, 0.16, 10),
@@ -151,12 +152,15 @@ export function addWorldAxes(scene) {
     );
     arrow.position.copy(axis.direction).multiplyScalar(length);
     arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis.direction);
-    scene.add(arrow);
+    group.add(arrow);
 
     const label = createAxisLabel(axis.label, axis.color);
     label.position.copy(axis.direction).multiplyScalar(length + labelOffset);
-    scene.add(label);
+    group.add(label);
   }
+
+  scene.add(group);
+  return group;
 }
 
 export function addObstacles(scene, obstacles) {

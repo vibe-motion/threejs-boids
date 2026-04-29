@@ -28,14 +28,16 @@ const COLLISION_DEBUG_RAY_GROW_SECONDS = 0.13;
 const DISPLAY_MODES = {
   1: {
     uiPanels: true,
+    worldAxes: true,
     sceneObjects: true,
   },
   2: {
     uiPanels: false,
+    worldAxes: false,
     sceneObjects: true,
   },
 };
-const DEFAULT_DISPLAY_MODE = "1";
+const DEFAULT_DISPLAY_MODE = "2";
 const textInputTypes = new Set([
   "date",
   "datetime-local",
@@ -145,7 +147,7 @@ const collisionDebugOverlay = createCollisionAvoidanceDebugOverlay(
 const lighting = addLighting(scene);
 lighting.setIntensity(readControlValue("light"));
 const aquariumEffects = addAquarium(scene);
-addWorldAxes(scene);
+const worldAxes = addWorldAxes(scene);
 scene.add(obstacleRay);
 scene.add(collisionDebugOverlay.group);
 const obstacleMeshes = addObstacles(scene, obstacles);
@@ -225,6 +227,7 @@ function applyDisplayMode(modeKey) {
 
   app.dataset.displayMode = modeKey;
   applyUIPanelsVisibility(mode.uiPanels);
+  applyWorldAxesVisibility(mode.worldAxes);
   applySceneObjectsVisibility(mode.sceneObjects);
 }
 
@@ -234,6 +237,10 @@ function applyUIPanelsVisibility(visible) {
 
 function applySceneObjectsVisibility(visible) {
   scene.visible = visible;
+}
+
+function applyWorldAxesVisibility(visible) {
+  worldAxes.visible = visible;
 }
 
 function bindObstacleKeyboardControls(obstacleMeshes) {
