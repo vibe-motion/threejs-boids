@@ -45,7 +45,7 @@ const DISPLAY_MODES = {
     sceneObjects: true,
   },
 };
-const DEFAULT_DISPLAY_MODE = "2";
+const DEFAULT_DISPLAY_MODE = "3";
 const textInputTypes = new Set([
   "date",
   "datetime-local",
@@ -99,7 +99,8 @@ const obstacleRayColors = {
   hit: new THREE.Color(0xff3636),
 };
 const collisionDebugColors = {
-  sphere: new THREE.Color(0x47c7ff),
+  sphere: new THREE.Color(0xffffff),
+  point: new THREE.Color(0xffffff),
   blocked: new THREE.Color(0xff4f4f),
   wall: new THREE.Color(0xffa640),
   selected: new THREE.Color(0x3cff84),
@@ -191,8 +192,19 @@ function bindPlaybackControls() {
   const stepButton = getRequiredElement("#step-frame");
   playbackControls = { toggleButton, stepButton };
 
-  toggleButton.addEventListener("click", () => {
+  const togglePlayback = () => {
     setSimulationPaused(!simulationPaused);
+  };
+
+  toggleButton.addEventListener("click", togglePlayback);
+
+  window.addEventListener("keydown", (event) => {
+    if (event.repeat || event.key !== "Enter" || isEditingText(event.target)) {
+      return;
+    }
+
+    event.preventDefault();
+    togglePlayback();
   });
 
   stepButton.addEventListener("click", () => {
@@ -564,11 +576,23 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
     opacity: 0.98,
     depthTest: false,
   });
+  const pointGeometry = new THREE.SphereGeometry(0.075, 12, 8);
+  const pointVertexColors = new Float32Array(
+    pointGeometry.attributes.position.count * 3,
+  ).fill(1);
+  pointGeometry.setAttribute(
+    "color",
+    new THREE.BufferAttribute(pointVertexColors, 3),
+  );
   const points = new THREE.InstancedMesh(
-    new THREE.SphereGeometry(0.075, 12, 8),
+    pointGeometry,
     pointMaterial,
     maxRayCount,
   );
+  for (let i = 0; i < maxRayCount; i += 1) {
+    points.setColorAt(i, collisionDebugColors.point);
+  }
+  points.instanceColor.needsUpdate = true;
   points.count = 0;
   points.frustumCulled = false;
   points.renderOrder = 32;
@@ -661,7 +685,10 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
           snapshot.maxDistance,
           pointProgress,
         );
-        points.setColorAt(visibleCount, color);
+        points.setColorAt(
+          visibleCount,
+          readCollisionCandidatePointColor(candidate),
+        );
         visibleCount += 1;
       }
       loggedCandidateCount = Math.max(loggedCandidateCount, visibleCount);
@@ -727,6 +754,10 @@ function readCollisionCandidateColor(candidate) {
   return hitsWall
     ? collisionDebugColors.wall
     : collisionDebugColors.blocked;
+}
+
+function readCollisionCandidatePointColor(candidate) {
+  return readCollisionCandidateColor(candidate);
 }
 
 function logCollisionAvoidanceSnapshot(snapshot) {
