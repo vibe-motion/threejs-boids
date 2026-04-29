@@ -22,7 +22,7 @@ export function createRenderer(canvas) {
 
 export function createScene() {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000);
+  scene.background = new THREE.Color(0x5d646c);
   return scene;
 }
 
@@ -37,7 +37,7 @@ export function addLighting(scene) {
   scene.add(hemiLight);
 
   const sun = new THREE.DirectionalLight(0xffffff, sunBaseIntensity);
-  sun.position.set(0.8, 15, 0.6);
+  sun.position.set(0.8, 13.5, 2.2);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -18;
@@ -60,32 +60,18 @@ export function addLighting(scene) {
 export function addAquarium(scene) {
   const group = new THREE.Group();
   const effects = [];
-
-  const glassMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x9bdcff,
-    roughness: 0.02,
-    metalness: 0,
-    transparent: true,
-    opacity: 0.12,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    forceSinglePass: true,
-    clearcoat: 1,
-    clearcoatRoughness: 0.08,
-  });
-
-  const aquariumGlass = new THREE.Mesh(
-    new THREE.BoxGeometry(aquariumSize.x, aquariumSize.y, aquariumSize.z),
-    glassMaterial,
+  const aquariumGeometry = new THREE.BoxGeometry(
+    aquariumSize.x,
+    aquariumSize.y,
+    aquariumSize.z,
   );
-  group.add(aquariumGlass);
 
   const aquariumEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(aquariumGlass.geometry),
+    new THREE.EdgesGeometry(aquariumGeometry),
     new THREE.LineBasicMaterial({
-      color: 0xc6efff,
+      color: 0x000000,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.62,
     }),
   );
   group.add(aquariumEdges);
@@ -93,7 +79,7 @@ export function addAquarium(scene) {
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(aquariumSize.x, aquariumSize.z),
     new THREE.MeshStandardMaterial({
-      color: 0x17222a,
+      color: 0x2f2f2f,
       roughness: 0.9,
       metalness: 0,
     }),
