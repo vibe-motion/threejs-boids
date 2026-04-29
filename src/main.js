@@ -27,11 +27,19 @@ const COLLISION_DEBUG_RAY_STEP_SECONDS = 0.16;
 const COLLISION_DEBUG_RAY_GROW_SECONDS = 0.13;
 const DISPLAY_MODES = {
   1: {
+    aquarium: true,
     uiPanels: true,
     worldAxes: true,
     sceneObjects: true,
   },
   2: {
+    aquarium: true,
+    uiPanels: false,
+    worldAxes: false,
+    sceneObjects: true,
+  },
+  3: {
+    aquarium: false,
     uiPanels: false,
     worldAxes: false,
     sceneObjects: true,
@@ -226,9 +234,14 @@ function applyDisplayMode(modeKey) {
   if (!mode) return;
 
   app.dataset.displayMode = modeKey;
+  applyAquariumVisibility(mode.aquarium);
   applyUIPanelsVisibility(mode.uiPanels);
   applyWorldAxesVisibility(mode.worldAxes);
   applySceneObjectsVisibility(mode.sceneObjects);
+}
+
+function applyAquariumVisibility(visible) {
+  aquariumEffects.group.visible = visible;
 }
 
 function applyUIPanelsVisibility(visible) {

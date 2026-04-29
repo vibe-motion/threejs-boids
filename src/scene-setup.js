@@ -54,6 +54,7 @@ export function addLighting(scene) {
 }
 
 export function addAquarium(scene) {
+  const group = new THREE.Group();
   const effects = [];
 
   const glassMaterial = new THREE.MeshPhysicalMaterial({
@@ -73,7 +74,7 @@ export function addAquarium(scene) {
     new THREE.BoxGeometry(aquariumSize.x, aquariumSize.y, aquariumSize.z),
     glassMaterial,
   );
-  scene.add(aquariumGlass);
+  group.add(aquariumGlass);
 
   const aquariumEdges = new THREE.LineSegments(
     new THREE.EdgesGeometry(aquariumGlass.geometry),
@@ -83,7 +84,7 @@ export function addAquarium(scene) {
       opacity: 0.42,
     }),
   );
-  scene.add(aquariumEdges);
+  group.add(aquariumEdges);
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(aquariumSize.x, aquariumSize.z),
@@ -96,7 +97,7 @@ export function addAquarium(scene) {
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = aquariumFloorY - 0.008;
   floor.receiveShadow = true;
-  scene.add(floor);
+  group.add(floor);
 
   const floorEdges = new THREE.LineSegments(
     new THREE.EdgesGeometry(floor.geometry),
@@ -108,11 +109,13 @@ export function addAquarium(scene) {
   );
   floorEdges.rotation.copy(floor.rotation);
   floorEdges.position.copy(floor.position);
-  scene.add(floorEdges);
+  group.add(floorEdges);
 
-  effects.push(addBubbleColumns(scene));
+  effects.push(addBubbleColumns(group));
+  scene.add(group);
 
   return {
+    group,
     update(time) {
       for (const effect of effects) {
         effect.update?.(time);
@@ -218,9 +221,6 @@ function createObstacleMaterial(obstacle, fallbackMaterial) {
 
 function createPlateCenterTexture() {
   const size = 512;
-  const lineWidth = 14;
-  const halfLineWidth = lineWidth / 2;
-  const center = size / 2;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
@@ -228,16 +228,6 @@ function createPlateCenterTexture() {
   const context = canvas.getContext("2d");
   context.fillStyle = "#b8584c";
   context.fillRect(0, 0, size, size);
-  context.fillStyle = "#fff5d6";
-  context.fillRect(center - halfLineWidth, 0, lineWidth, size);
-  context.fillRect(0, center - halfLineWidth, size, lineWidth);
-  context.font = "bold 112px sans-serif";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText("1", center * 0.5, center * 0.5);
-  context.fillText("2", center * 1.5, center * 0.5);
-  context.fillText("3", center * 0.5, center * 1.5);
-  context.fillText("4", center * 1.5, center * 1.5);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
