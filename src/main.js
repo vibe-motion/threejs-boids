@@ -1162,6 +1162,7 @@ function resize() {
 }
 
 function syncRayLineResolution(width, height) {
+  aquariumEffects.setResolution(width, height);
   obstacleRay.material.resolution.set(width, height);
   collisionDebugOverlay.setResolution(width, height);
 }

@@ -1,5 +1,11 @@
 import * as THREE from "three";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { aquariumFloorY, aquariumSize, waterLevelY } from "./config.js";
+
+const aquariumBoxLineWidth = 0.055;
+const obstacleOutlineScale = new THREE.Vector3(1.035, 1.035, 1.035);
 
 export function createRenderer(canvas) {
   if (!canvas) {
@@ -61,20 +67,8 @@ export function addLighting(scene) {
 export function addAquarium(scene) {
   const group = new THREE.Group();
   const effects = [];
-  const aquariumGeometry = new THREE.BoxGeometry(
-    aquariumSize.x,
-    aquariumSize.y,
-    aquariumSize.z,
-  );
 
-  const aquariumEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(aquariumGeometry),
-    new THREE.LineBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 0.62,
-    }),
-  );
+  const aquariumEdges = createAquariumEdges();
   group.add(aquariumEdges);
 
   const floor = new THREE.Mesh(
@@ -112,7 +106,49 @@ export function addAquarium(scene) {
         effect.update?.(time);
       }
     },
+    setResolution(width, height) {
+      aquariumEdges.material.resolution.set(width, height);
+    },
   };
+}
+
+function createAquariumEdges() {
+  const geometry = new LineSegmentsGeometry();
+  geometry.setPositions(createBoxEdgePositions(aquariumSize));
+
+  const material = new LineMaterial({
+    color: 0x101010,
+    linewidth: aquariumBoxLineWidth,
+    worldUnits: true,
+    depthTest: true,
+    depthWrite: false,
+    toneMapped: false,
+  });
+
+  return new LineSegments2(geometry, material);
+}
+
+function createBoxEdgePositions(size) {
+  const halfX = size.x * 0.5;
+  const halfY = size.y * 0.5;
+  const halfZ = size.z * 0.5;
+
+  return [
+    -halfX, -halfY, -halfZ, halfX, -halfY, -halfZ,
+    halfX, -halfY, -halfZ, halfX, -halfY, halfZ,
+    halfX, -halfY, halfZ, -halfX, -halfY, halfZ,
+    -halfX, -halfY, halfZ, -halfX, -halfY, -halfZ,
+
+    -halfX, halfY, -halfZ, halfX, halfY, -halfZ,
+    halfX, halfY, -halfZ, halfX, halfY, halfZ,
+    halfX, halfY, halfZ, -halfX, halfY, halfZ,
+    -halfX, halfY, halfZ, -halfX, halfY, -halfZ,
+
+    -halfX, -halfY, -halfZ, -halfX, halfY, -halfZ,
+    halfX, -halfY, -halfZ, halfX, halfY, -halfZ,
+    halfX, -halfY, halfZ, halfX, halfY, halfZ,
+    -halfX, -halfY, halfZ, -halfX, halfY, halfZ,
+  ];
 }
 
 export function addWorldAxes(scene) {
@@ -166,8 +202,9 @@ export function addObstacles(scene, obstacles) {
   const obstacleMeshes = [];
 
   for (const obstacle of obstacles) {
+    const geometry = createObstacleGeometry(obstacle);
     const mesh = new THREE.Mesh(
-      createObstacleGeometry(obstacle),
+      geometry,
       createObstacleMaterial(obstacle, obstacleMaterial),
     );
     mesh.position.copy(obstacle.position);
@@ -176,11 +213,35 @@ export function addObstacles(scene, obstacles) {
     }
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    mesh.renderOrder = 2;
+
+    if (obstacle.shape === "plate") {
+      const outlineMesh = createObstacleOutline(geometry);
+      mesh.add(outlineMesh);
+      mesh.userData.outlineMesh = outlineMesh;
+    }
+
     scene.add(mesh);
     obstacleMeshes.push({ obstacle, mesh });
   }
 
   return obstacleMeshes;
+}
+
+function createObstacleOutline(geometry) {
+  const outlineMaterial = new THREE.MeshBasicMaterial({
+    color: 0x101010,
+    side: THREE.BackSide,
+    depthTest: true,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const outlineMesh = new THREE.Mesh(geometry, outlineMaterial);
+  outlineMesh.scale.copy(obstacleOutlineScale);
+  outlineMesh.castShadow = false;
+  outlineMesh.receiveShadow = false;
+  outlineMesh.renderOrder = 1;
+  return outlineMesh;
 }
 
 function createObstacleMaterial(obstacle, fallbackMaterial) {
