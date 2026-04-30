@@ -16,20 +16,20 @@ export const fishConfig = {
 };
 
 export const simulationSettings = {
-  minSpeed: 2,
-  maxSpeed: 5,
-  maxTurnRate: 1,
-  perceptionRadius: 3,
-  avoidanceRadius: 1,
-  maxSteerForce: 3,
+  minSpeed: 2.8,
+  maxSpeed: 7,
+  maxTurnRate: 1.4,
+  perceptionRadius: 4.2,
+  avoidanceRadius: 1.4,
+  maxSteerForce: 4.2,
   alignWeight: 0,
   cohesionWeight: 0,
   separateWeight: 0,
   boundsRadius: 0.27,
   avoidCollisionWeight: 10,
-  collisionAvoidDistance: 5,
+  collisionAvoidDistance: 7,
   boundaryWeight: 9,
-  boundaryMargin: 2,
+  boundaryMargin: 2.8,
 };
 
 export const obstacles = [];
