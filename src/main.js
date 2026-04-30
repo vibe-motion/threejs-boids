@@ -34,6 +34,7 @@ const ZIP_STORE_METHOD = 0;
 const ZIP_VERSION_NEEDED = 10;
 const crc32Table = createCrc32Table();
 const MAX_TIMELINE_FRAMES = 600;
+const MAX_PREVIEW_FRAME_ADVANCE = 4;
 const TIMELINE_GAP_SECONDS = 0.5;
 const POST_AVOIDANCE_SWIM_SECONDS = 5;
 const EXPORT_SETTLE_FRAMES = 2;
@@ -167,6 +168,8 @@ let renderControls = null;
 let currentRenderFrame = 0;
 let renderTimelineTotalFrames = 1;
 let timelinePlaying = true;
+let previewPlaybackTimestamp = null;
+let previewPlaybackAccumulator = 0;
 let applyingAbsoluteFrame = false;
 let collisionDebugLoggingEnabled = true;
 let didAutoPauseForCollisionAvoidance = false;
@@ -480,20 +483,60 @@ function rebuildFishMesh() {
   cameraRig.updateFishCamera(simulation.fish[fishConfig.highlightedIndex]);
 }
 
-function animate() {
+function animate(timestamp = 0) {
   if (timelinePlaying) {
-    const nextFrame = currentRenderFrame >= renderTimelineTotalFrames - 1
-      ? 0
-      : currentRenderFrame + 1;
-    setRenderFrame(nextFrame, { playing: true });
+    advancePreviewPlayback(timestamp);
     return;
   }
 
+  resetPreviewPlaybackClock();
   if (cameraRig.isFreeCameraEnabled) {
     cameraRig.update(STEP_FRAME_SECONDS);
     renderer.render(scene, cameraRig.activeCamera);
     cameraPanel.update();
   }
+}
+
+function advancePreviewPlayback(timestamp) {
+  const timestampSeconds = Number.isFinite(timestamp)
+    ? timestamp / 1000
+    : null;
+
+  if (timestampSeconds === null || previewPlaybackTimestamp === null) {
+    previewPlaybackTimestamp = timestampSeconds;
+    renderCurrentFrame();
+    syncPlaybackControls();
+    syncRenderControls();
+    return;
+  }
+
+  const elapsed = Math.min(
+    Math.max(0, timestampSeconds - previewPlaybackTimestamp),
+    STEP_FRAME_SECONDS * MAX_PREVIEW_FRAME_ADVANCE,
+  );
+  previewPlaybackTimestamp = timestampSeconds;
+  previewPlaybackAccumulator += elapsed;
+
+  const frameAdvance = Math.min(
+    MAX_PREVIEW_FRAME_ADVANCE,
+    Math.floor(previewPlaybackAccumulator / STEP_FRAME_SECONDS),
+  );
+  if (frameAdvance <= 0) {
+    return;
+  }
+
+  previewPlaybackAccumulator -= frameAdvance * STEP_FRAME_SECONDS;
+  setRenderFrame(readAdvancedRenderFrame(frameAdvance), { playing: true });
+}
+
+function resetPreviewPlaybackClock() {
+  previewPlaybackTimestamp = null;
+  previewPlaybackAccumulator = 0;
+}
+
+function readAdvancedRenderFrame(frameAdvance) {
+  const totalFrames = Math.max(1, renderTimelineTotalFrames);
+  return (currentRenderFrame + frameAdvance) % totalFrames;
 }
 
 function stepTimelineFrame(frameDt, options = {}) {
