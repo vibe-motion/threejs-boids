@@ -6,6 +6,7 @@ import { aquariumFloorY, aquariumSize, waterLevelY } from "./config.js";
 
 const aquariumBoxLineWidth = 0.055;
 const obstacleOutlineScale = new THREE.Vector3(1.035, 1.035, 1.035);
+const sceneBackgroundColor = new THREE.Color(0x5d646c);
 
 export function createRenderer(canvas) {
   if (!canvas) {
@@ -15,9 +16,11 @@ export function createRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: true,
+    alpha: true,
     powerPreference: "high-performance",
     preserveDrawingBuffer: true,
   });
+  renderer.setClearAlpha(0);
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -27,9 +30,9 @@ export function createRenderer(canvas) {
   return renderer;
 }
 
-export function createScene() {
+export function createScene({ transparentBackground = false } = {}) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x5d646c);
+  scene.background = transparentBackground ? null : sceneBackgroundColor.clone();
   return scene;
 }
 

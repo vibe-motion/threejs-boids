@@ -86,11 +86,13 @@ const textInputTypes = new Set([
 const app = getRequiredElement("#app");
 const previewShell = getRequiredElement("#preview-shell");
 const canvas = getRequiredElement("#scene");
-const renderer = createRenderer(canvas);
-const scene = createScene();
-const cameraRig = createCameraRig(renderer);
 const query = new URLSearchParams(window.location.search);
 const renderOptions = readRenderOptions(query);
+const renderer = createRenderer(canvas);
+const scene = createScene({
+  transparentBackground: renderOptions.transparentBackground,
+});
+const cameraRig = createCameraRig(renderer);
 const headingDebugger = createHeadingDebugger({
   enabled: query.get("debugHeading") === "1",
   frameLimit: Number(query.get("debugFrames")) || undefined,
@@ -1245,6 +1247,7 @@ function readRenderOptions(params) {
 
   return {
     isExportMode: exportMode === "transparent" || exportMode === "composite-transparent",
+    transparentBackground: exportMode === "transparent" || exportMode === "composite-transparent",
     renderScale: Number.isFinite(renderScale)
       ? THREE.MathUtils.clamp(renderScale, 1, 16)
       : DEFAULT_EXPORT_RENDER_SCALE,
@@ -1498,27 +1501,46 @@ async function exportSequence() {
 
 async function renderFixedSizePngBlob({ frame, renderScale }) {
   return withFixedSizeRenderer(renderScale, async () => {
-    renderAbsoluteFrame(frame);
-    return await canvasToBlob(canvas, "image/png");
+    return await withTransparentRenderBackground(async () => {
+      renderAbsoluteFrame(frame);
+      return await canvasToBlob(canvas, "image/png");
+    });
   });
 }
 
 async function renderFixedSizeZipBlob({ startFrame, endFrame, renderScale, onFrame }) {
   return withFixedSizeRenderer(renderScale, async () => {
-    const entries = [];
+    return await withTransparentRenderBackground(async () => {
+      const entries = [];
 
-    for (let frame = startFrame; frame <= endFrame; frame += 1) {
-      onFrame?.(frame);
-      renderAbsoluteFrame(frame);
-      const blob = await canvasToBlob(canvas, "image/png");
-      entries.push({
-        name: formatFrameFileName(frame),
-        data: new Uint8Array(await blob.arrayBuffer()),
-      });
-    }
+      for (let frame = startFrame; frame <= endFrame; frame += 1) {
+        onFrame?.(frame);
+        renderAbsoluteFrame(frame);
+        const blob = await canvasToBlob(canvas, "image/png");
+        entries.push({
+          name: formatFrameFileName(frame),
+          data: new Uint8Array(await blob.arrayBuffer()),
+        });
+      }
 
-    return createStoredZipBlob(entries);
+      return createStoredZipBlob(entries);
+    });
   });
+}
+
+async function withTransparentRenderBackground(task) {
+  const previousBackground = scene.background;
+  const previousClearAlpha = renderer.getClearAlpha();
+
+  scene.background = null;
+  renderer.setClearAlpha(0);
+
+  try {
+    return await task();
+  } finally {
+    scene.background = previousBackground;
+    renderer.setClearAlpha(previousClearAlpha);
+  }
 }
 
 async function withFixedSizeRenderer(renderScale, task) {
