@@ -100,14 +100,18 @@ const simulation = new FishSchoolSimulation({
 });
 
 const controls = {
-  count: createControl("#count", "#count-value"),
   separation: createControl("#separation", "#separation-value"),
+  alignment: createControl("#alignment", "#alignment-value"),
+  cohesion: createControl("#cohesion", "#cohesion-value"),
+  count: createControl("#count", "#count-value"),
   avoidance: createControl("#avoidance", "#avoidance-value"),
   turnRate: createControl("#turn-rate", "#turn-rate-value"),
 };
 
 const simulationControlSettings = {
   separation: "separateWeight",
+  alignment: "alignWeight",
+  cohesion: "cohesionWeight",
   avoidance: "avoidCollisionWeight",
   turnRate: "maxTurnRate",
 };
