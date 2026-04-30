@@ -159,7 +159,7 @@ export function addWorldAxes(scene) {
 
 export function addObstacles(scene, obstacles) {
   const obstacleMaterial = new THREE.MeshStandardMaterial({
-    color: 0xb8584c,
+    color: 0xffffff,
     roughness: 0.52,
     metalness: 0.08,
   });
@@ -195,7 +195,7 @@ function createObstacleMaterial(obstacle, fallbackMaterial) {
     metalness: 0.08,
   });
   const edgeMaterial = new THREE.MeshStandardMaterial({
-    color: 0xb8584c,
+    color: 0xffffff,
     roughness: 0.52,
     metalness: 0.08,
   });
@@ -217,7 +217,7 @@ function createPlateCenterTexture() {
   canvas.height = size;
 
   const context = canvas.getContext("2d");
-  context.fillStyle = "#b8584c";
+  context.fillStyle = "#ffffff";
   context.fillRect(0, 0, size, size);
 
   const texture = new THREE.CanvasTexture(canvas);

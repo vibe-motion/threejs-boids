@@ -18,7 +18,7 @@ export const simulationSettings = {
   minSpeed: 2,
   maxSpeed: 5,
   maxTurnRate: 1,
-  perceptionRadius: 2.7,
+  perceptionRadius: 3,
   avoidanceRadius: 1,
   maxSteerForce: 3,
   alignWeight: 1,

@@ -38,6 +38,7 @@ const TIMELINE_GAP_SECONDS = 0.5;
 const POST_AVOIDANCE_SWIM_SECONDS = 5;
 const EXPORT_SETTLE_FRAMES = 2;
 const AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE = true;
+const DEFAULT_LIGHT_INTENSITY = 1.3;
 const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
 const COLLISION_DEBUG_RAY_DELAY_SECONDS = 0.04;
 const COLLISION_DEBUG_RAY_STEP_SECONDS = 0.16;
@@ -100,15 +101,12 @@ const simulation = new FishSchoolSimulation({
 
 const controls = {
   count: createControl("#count", "#count-value"),
-  perception: createControl("#perception", "#perception-value"),
   separation: createControl("#separation", "#separation-value"),
   avoidance: createControl("#avoidance", "#avoidance-value"),
   turnRate: createControl("#turn-rate", "#turn-rate-value"),
-  light: createControl("#light", "#light-value"),
 };
 
 const simulationControlSettings = {
-  perception: "perceptionRadius",
   separation: "separateWeight",
   avoidance: "avoidCollisionWeight",
   turnRate: "maxTurnRate",
@@ -185,7 +183,7 @@ const collisionDebugOverlay = createCollisionAvoidanceDebugOverlay(
 );
 
 const lighting = addLighting(scene);
-lighting.setIntensity(readControlValue("light"));
+lighting.setIntensity(DEFAULT_LIGHT_INTENSITY);
 const aquariumEffects = addAquarium(scene);
 const worldAxes = addWorldAxes(scene);
 scene.add(obstacleRay);
@@ -438,12 +436,6 @@ function setSimulationPaused(paused, { syncControls = true } = {}) {
 function applyControlChange(key) {
   if (key === "count") {
     setFishCount(readControlValue(key));
-    return;
-  }
-
-  if (key === "light") {
-    lighting.setIntensity(readControlValue(key));
-    renderCurrentFrame();
     return;
   }
 
