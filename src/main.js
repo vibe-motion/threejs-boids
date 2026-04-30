@@ -33,11 +33,12 @@ const DEFAULT_EXPORT_RENDER_SCALE = 2;
 const ZIP_STORE_METHOD = 0;
 const ZIP_VERSION_NEEDED = 10;
 const crc32Table = createCrc32Table();
-const MAX_TIMELINE_SECONDS = 14;
+const MAX_TIMELINE_FRAMES = 600;
 const TIMELINE_GAP_SECONDS = 0.5;
 const POST_AVOIDANCE_SWIM_SECONDS = 5;
 const EXPORT_SETTLE_FRAMES = 2;
-const AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE = true;
+const AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE = false;
+const SHOW_OBSTACLE_RAY = false;
 const DEFAULT_LIGHT_INTENSITY = 1.3;
 const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
 const COLLISION_DEBUG_RAY_DELAY_SECONDS = 0.04;
@@ -155,8 +156,8 @@ const introCameraView = {
   speed: INTRO_CAMERA_SPEED,
 };
 
-let timelineStartCameraView = cameraViewPresets.z;
-let timelineIntroCameraEnabled = true;
+let timelineStartCameraView = cameraViewPresets.default;
+let timelineIntroCameraEnabled = false;
 let fishMesh = null;
 let simulationPaused = false;
 let pendingSimulationSteps = 0;
@@ -202,8 +203,7 @@ bindDisplayModeControls();
 bindObstacleKeyboardControls(obstacleMeshes);
 bindCameraViewControls(cameraRig);
 applyDisplayMode(DEFAULT_DISPLAY_MODE);
-cameraRig.setOrbitView(cameraViewPresets.z);
-cameraRig.flyToOrbitView(introCameraView);
+cameraRig.setOrbitView(cameraViewPresets.default);
 const cameraPanel = bindCameraPanel(cameraRig);
 simulation.reset(readControlValue("count"));
 rebuildFishMesh();
@@ -632,14 +632,13 @@ function refreshRenderTimeline({ frame = currentRenderFrame, playing = timelineP
 }
 
 function computeRenderTimelineTotalFrames() {
-  const maxFrames = Math.ceil(MAX_TIMELINE_SECONDS * RENDER_FPS);
   const previousLoggingEnabled = collisionDebugLoggingEnabled;
   applyingAbsoluteFrame = true;
   collisionDebugLoggingEnabled = false;
 
   try {
     resetTimelineState();
-    for (let frame = 0; frame < maxFrames; frame += 1) {
+    for (let frame = 0; frame < MAX_TIMELINE_FRAMES; frame += 1) {
       stepTimelineFrame(STEP_FRAME_SECONDS, {
         exposeDebug: false,
         logDebug: false,
@@ -654,7 +653,7 @@ function computeRenderTimelineTotalFrames() {
     applyingAbsoluteFrame = false;
   }
 
-  return maxFrames;
+  return MAX_TIMELINE_FRAMES;
 }
 
 function readSelectedCollisionCandidateIndex(snapshot) {
@@ -1096,6 +1095,11 @@ function easeOutBack(value) {
 }
 
 function updateObstacleRay() {
+  if (!SHOW_OBSTACLE_RAY) {
+    obstacleRay.visible = false;
+    return;
+  }
+
   const fish = simulation.fish[fishConfig.highlightedIndex];
   if (!fish) {
     obstacleRay.visible = false;

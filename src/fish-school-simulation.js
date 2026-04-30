@@ -2,8 +2,6 @@ import * as THREE from "three";
 import {
   createRayDirections,
   mulberry32,
-  randomPointInAquarium,
-  randomPointInSphere,
 } from "./random.js";
 
 export class FishSchoolSimulation {
@@ -46,16 +44,9 @@ export class FishSchoolSimulation {
     }
   }
 
-  createFish(index = this.fish.length) {
-    if (index === 0) {
-      const collisionFish = this.createInitialCollisionFish();
-      if (collisionFish) {
-        return collisionFish;
-      }
-    }
-
-    const position = randomPointInAquarium(this.random, this.aquariumHalfSize, 0.62);
-    const direction = randomPointInSphere(this.random, 1).normalize();
+  createFish() {
+    const position = this.createInitialAlignmentPosition();
+    const direction = this.createInitialAlignmentDirection();
     const speed = THREE.MathUtils.lerp(
       this.settings.minSpeed,
       this.settings.maxSpeed,
@@ -68,25 +59,20 @@ export class FishSchoolSimulation {
     };
   }
 
-  createInitialCollisionFish() {
-    const plate = this.obstacles.find((obstacle) => obstacle.shape === "plate");
-    if (!plate?.size) {
-      return null;
-    }
+  createInitialAlignmentPosition() {
+    return new THREE.Vector3(
+      THREE.MathUtils.lerp(4.8, 6.8, this.random()),
+      (this.random() * 2 - 1) * this.aquariumHalfSize.y * 0.52,
+      (this.random() * 2 - 1) * this.aquariumHalfSize.z * 0.58,
+    );
+  }
 
-    const target = plate.position.clone();
-    target.y -= plate.size.y * 0.18;
-    target.z += plate.size.z * 0.18;
-
-    const position = target.clone();
-    position.x = 5;
-
-    const speed = THREE.MathUtils.lerp(this.settings.minSpeed, this.settings.maxSpeed, 0.72);
-
-    return {
-      position,
-      velocity: new THREE.Vector3(-speed, 0, 0),
-    };
+  createInitialAlignmentDirection() {
+    return new THREE.Vector3(
+      -1,
+      (this.random() * 2 - 1) * 0.06,
+      (this.random() * 2 - 1) * 0.08,
+    ).normalize();
   }
 
   update(dt, options = {}) {

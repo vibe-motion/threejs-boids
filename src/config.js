@@ -21,9 +21,9 @@ export const simulationSettings = {
   perceptionRadius: 3,
   avoidanceRadius: 1,
   maxSteerForce: 3,
-  alignWeight: 1,
-  cohesionWeight: 1,
-  separateWeight: 1.35,
+  alignWeight: 0,
+  cohesionWeight: 0,
+  separateWeight: 0,
   boundsRadius: 0.27,
   avoidCollisionWeight: 10,
   collisionAvoidDistance: 5,
@@ -31,11 +31,4 @@ export const simulationSettings = {
   boundaryMargin: 2,
 };
 
-export const obstacles = [
-  {
-    position: new THREE.Vector3(-6, 2, 2),
-    radius: 1.75,
-    shape: "plate",
-    size: new THREE.Vector3(0.24, 2.8, 3.4),
-  },
-];
+export const obstacles = [];
