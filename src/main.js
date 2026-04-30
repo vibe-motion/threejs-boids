@@ -23,7 +23,11 @@ const RENDER_FPS = 60;
 const EXPORT_WIDTH = 2048;
 const EXPORT_HEIGHT = 1152;
 const EXPORT_ASPECT_RATIO = EXPORT_WIDTH / EXPORT_HEIGHT;
-const EXPORT_API_PORT = 4174;
+const EXPORT_RENDER_SCALES = new Set([1, 2]);
+const DEFAULT_EXPORT_RENDER_SCALE = 1;
+const ZIP_STORE_METHOD = 0;
+const ZIP_VERSION_NEEDED = 10;
+const crc32Table = createCrc32Table();
 const MAX_TIMELINE_SECONDS = 14;
 const SELECTED_RAY_HOLD_SECONDS = 0.35;
 const CAMERA_REVEAL_BUFFER_SECONDS = 0.75;
@@ -242,6 +246,7 @@ function bindRenderControls() {
   const frameCount = getOptionalElement("#render-frame-count");
   const exportFrameButton = getOptionalElement("#export-frame");
   const exportSequenceButton = getOptionalElement("#export-sequence");
+  const exportScaleSelect = getOptionalSelect("#export-scale");
   const exportStatus = getOptionalElement("#export-status");
 
   if (!frameInput || !frameRange || !frameCount) {
@@ -254,6 +259,7 @@ function bindRenderControls() {
     frameCount,
     exportFrameButton,
     exportSequenceButton,
+    exportScaleSelect,
     exportStatus,
   };
 
@@ -1267,16 +1273,21 @@ async function exportCurrentFrame() {
   if (!renderControls?.exportStatus) return;
 
   const status = renderControls.exportStatus;
+  const renderScale = readExportRenderScale();
+  const exportSize = readExportSize(renderScale);
   const filename = `boids-frame-${String(currentRenderFrame).padStart(4, "0")}.png`;
   setExportButtonsDisabled(true);
-  status.textContent = `Exporting frame ${currentRenderFrame + 1}/${renderTimelineTotalFrames}...`;
+  status.textContent =
+    `Exporting ${exportSize.width}x${exportSize.height} frame `
+    + `${currentRenderFrame + 1}/${renderTimelineTotalFrames}...`;
 
   try {
-    renderCurrentFrame();
-    await waitForAnimationFrames(1);
-    const blob = await canvasToBlob(canvas, "image/png");
+    const blob = await renderFixedSizePngBlob({
+      frame: currentRenderFrame,
+      renderScale,
+    });
     downloadBlob(blob, filename);
-    status.textContent = "PNG exported.";
+    status.textContent = `PNG exported at ${exportSize.width}x${exportSize.height}.`;
   } catch (error) {
     status.textContent = `Export failed: ${error.message}`;
   } finally {
@@ -1285,49 +1296,83 @@ async function exportCurrentFrame() {
 }
 
 async function exportSequence() {
-  await requestExport({
-    endpoint: "/export/sequence",
-    body: {
-      startFrame: 0,
-      endFrame: renderTimelineTotalFrames - 1,
-    },
-    filename: `boids-frames-${String(renderTimelineTotalFrames).padStart(4, "0")}.zip`,
-    loadingMessage: `Exporting ${renderTimelineTotalFrames} frames...`,
-    successMessage: "ZIP exported.",
-  });
-}
-
-async function requestExport({ endpoint, body, loadingMessage, successMessage }) {
   if (!renderControls?.exportStatus) return;
 
   const status = renderControls.exportStatus;
+  const renderScale = readExportRenderScale();
+  const exportSize = readExportSize(renderScale);
+  const startFrame = 0;
+  const endFrame = renderTimelineTotalFrames - 1;
+  const filename = `boids-frames-${String(renderTimelineTotalFrames).padStart(4, "0")}.zip`;
   setExportButtonsDisabled(true);
-  status.textContent = loadingMessage;
+  status.textContent =
+    `Exporting ${renderTimelineTotalFrames} frames at `
+    + `${exportSize.width}x${exportSize.height}...`;
 
   try {
-    const response = await fetch(`${readExportApiBaseUrl()}${endpoint}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const blob = await renderFixedSizeZipBlob({
+      startFrame,
+      endFrame,
+      renderScale,
+      onFrame: (frame) => {
+        status.textContent =
+          `Exporting ${exportSize.width}x${exportSize.height} frame `
+          + `${frame + 1}/${renderTimelineTotalFrames}...`;
       },
-      body: JSON.stringify(body),
     });
-
-    if (!response.ok) {
-      throw new Error((await response.text()) || `Export request failed with ${response.status}`);
-    }
-
-    const disposition = response.headers.get("Content-Disposition") ?? "";
-    const filename = readAttachmentFileName(disposition) ?? "boids-render.png";
-    downloadBlob(await response.blob(), filename);
-    status.textContent = successMessage;
+    downloadBlob(blob, filename);
+    status.textContent = `ZIP exported at ${exportSize.width}x${exportSize.height}.`;
   } catch (error) {
-    status.textContent =
-      error instanceof TypeError
-        ? `Export failed: start export server on port ${EXPORT_API_PORT} for ZIP.`
-        : `Export failed: ${error.message}`;
+    status.textContent = `Export failed: ${error.message}`;
   } finally {
     setExportButtonsDisabled(false);
+  }
+}
+
+async function renderFixedSizePngBlob({ frame, renderScale }) {
+  return withFixedSizeRenderer(renderScale, async () => {
+    renderAbsoluteFrame(frame);
+    return await canvasToBlob(canvas, "image/png");
+  });
+}
+
+async function renderFixedSizeZipBlob({ startFrame, endFrame, renderScale, onFrame }) {
+  return withFixedSizeRenderer(renderScale, async () => {
+    const entries = [];
+
+    for (let frame = startFrame; frame <= endFrame; frame += 1) {
+      onFrame?.(frame);
+      renderAbsoluteFrame(frame);
+      const blob = await canvasToBlob(canvas, "image/png");
+      entries.push({
+        name: formatFrameFileName(frame),
+        data: new Uint8Array(await blob.arrayBuffer()),
+      });
+    }
+
+    return createStoredZipBlob(entries);
+  });
+}
+
+async function withFixedSizeRenderer(renderScale, task) {
+  const { width, height } = readExportSize(renderScale);
+  const previousPixelRatio = renderer.getPixelRatio();
+  const wasTimelinePlaying = timelinePlaying;
+
+  timelinePlaying = false;
+  syncPlaybackControls();
+
+  renderer.setPixelRatio(1);
+  cameraRig.resize(width, height);
+  renderer.setSize(width, height, false);
+
+  try {
+    return await task();
+  } finally {
+    renderer.setPixelRatio(previousPixelRatio);
+    resize();
+    timelinePlaying = wasTimelinePlaying;
+    syncPlaybackControls();
   }
 }
 
@@ -1341,8 +1386,135 @@ function setExportButtonsDisabled(disabled) {
   }
 }
 
-function readExportApiBaseUrl() {
-  return `http://${window.location.hostname || "127.0.0.1"}:${EXPORT_API_PORT}`;
+function readExportRenderScale() {
+  const value = Number(renderControls?.exportScaleSelect?.value);
+  return EXPORT_RENDER_SCALES.has(value) ? value : DEFAULT_EXPORT_RENDER_SCALE;
+}
+
+function readExportSize(renderScale) {
+  return {
+    width: Math.round(EXPORT_WIDTH * renderScale),
+    height: Math.round(EXPORT_HEIGHT * renderScale),
+  };
+}
+
+function formatFrameFileName(frame) {
+  return `frame-${String(frame).padStart(4, "0")}.png`;
+}
+
+function createStoredZipBlob(entries) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  let centralSize = 0;
+
+  for (const entry of entries) {
+    if (entry.data.length > 0xffffffff) {
+      throw new Error("A ZIP entry is too large for browser export.");
+    }
+
+    const nameBytes = encoder.encode(entry.name);
+    const crc = computeCrc32(entry.data);
+    const localHeader = createZipLocalHeader({ nameBytes, data: entry.data, crc });
+    const centralHeader = createZipCentralHeader({
+      nameBytes,
+      data: entry.data,
+      crc,
+      localHeaderOffset: offset,
+    });
+
+    localParts.push(localHeader, entry.data);
+    centralParts.push(centralHeader);
+    offset += localHeader.length + entry.data.length;
+    centralSize += centralHeader.length;
+
+    if (offset > 0xffffffff || centralSize > 0xffffffff) {
+      throw new Error("ZIP is too large for browser export.");
+    }
+  }
+
+  const centralOffset = offset;
+  const endRecord = createZipEndRecord({
+    entryCount: entries.length,
+    centralSize,
+    centralOffset,
+  });
+
+  return new Blob([...localParts, ...centralParts, endRecord], {
+    type: "application/zip",
+  });
+}
+
+function createZipLocalHeader({ nameBytes, data, crc }) {
+  const header = new Uint8Array(30 + nameBytes.length);
+  const view = new DataView(header.buffer);
+
+  view.setUint32(0, 0x04034b50, true);
+  view.setUint16(4, ZIP_VERSION_NEEDED, true);
+  view.setUint16(8, ZIP_STORE_METHOD, true);
+  view.setUint32(14, crc, true);
+  view.setUint32(18, data.length, true);
+  view.setUint32(22, data.length, true);
+  view.setUint16(26, nameBytes.length, true);
+  header.set(nameBytes, 30);
+  return header;
+}
+
+function createZipCentralHeader({ nameBytes, data, crc, localHeaderOffset }) {
+  const header = new Uint8Array(46 + nameBytes.length);
+  const view = new DataView(header.buffer);
+
+  view.setUint32(0, 0x02014b50, true);
+  view.setUint16(4, ZIP_VERSION_NEEDED, true);
+  view.setUint16(6, ZIP_VERSION_NEEDED, true);
+  view.setUint16(10, ZIP_STORE_METHOD, true);
+  view.setUint32(16, crc, true);
+  view.setUint32(20, data.length, true);
+  view.setUint32(24, data.length, true);
+  view.setUint16(28, nameBytes.length, true);
+  view.setUint32(42, localHeaderOffset, true);
+  header.set(nameBytes, 46);
+  return header;
+}
+
+function createZipEndRecord({ entryCount, centralSize, centralOffset }) {
+  if (entryCount > 0xffff) {
+    throw new Error("ZIP has too many files.");
+  }
+
+  const record = new Uint8Array(22);
+  const view = new DataView(record.buffer);
+  view.setUint32(0, 0x06054b50, true);
+  view.setUint16(8, entryCount, true);
+  view.setUint16(10, entryCount, true);
+  view.setUint32(12, centralSize, true);
+  view.setUint32(16, centralOffset, true);
+  return record;
+}
+
+function computeCrc32(bytes) {
+  let crc = 0xffffffff;
+
+  for (const byte of bytes) {
+    crc = crc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function createCrc32Table() {
+  const table = new Uint32Array(256);
+
+  for (let i = 0; i < table.length; i += 1) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[i] = value >>> 0;
+  }
+
+  return table;
 }
 
 function downloadBlob(blob, filename) {
@@ -1365,11 +1537,6 @@ function canvasToBlob(targetCanvas, type) {
       reject(new Error("Canvas export failed."));
     }, type);
   });
-}
-
-function readAttachmentFileName(disposition) {
-  const match = disposition.match(/filename="?([^";]+)"?/i);
-  return match?.[1] ?? null;
 }
 
 function createControl(inputSelector, outputSelector) {
@@ -1428,6 +1595,19 @@ function getOptionalInput(selector) {
 
   if (!(element instanceof HTMLInputElement)) {
     throw new Error(`Expected ${selector} to be an input element.`);
+  }
+
+  return element;
+}
+
+function getOptionalSelect(selector) {
+  const element = getOptionalElement(selector);
+  if (!element) {
+    return null;
+  }
+
+  if (!(element instanceof HTMLSelectElement)) {
+    throw new Error(`Expected ${selector} to be a select element.`);
   }
 
   return element;

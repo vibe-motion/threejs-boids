@@ -19,6 +19,8 @@ const RENDER_PORT = Number(process.env.SCENE_EXPORT_RENDER_PORT || 4173);
 const VIEWPORT_WIDTH = Number(process.env.SCENE_EXPORT_VIEWPORT_WIDTH || 2048);
 const VIEWPORT_HEIGHT = Number(process.env.SCENE_EXPORT_VIEWPORT_HEIGHT || 1152);
 const DEVICE_SCALE_FACTOR = Number(process.env.SCENE_EXPORT_DEVICE_SCALE_FACTOR || 1);
+const MIN_RENDER_SCALE = 1;
+const MAX_RENDER_SCALE = 2;
 const BROWSER_EXECUTABLE =
   process.env.SCENE_EXPORT_BROWSER || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const FRAME_FILE_PADDING = 4;
@@ -87,6 +89,15 @@ function formatFrameFileName(frame) {
   return `frame-${String(frame).padStart(FRAME_FILE_PADDING, "0")}.png`;
 }
 
+function normalizeRenderScale(value) {
+  const scale = Number(value);
+  if (Number.isFinite(scale)) {
+    return Math.min(Math.max(scale, MIN_RENDER_SCALE), MAX_RENDER_SCALE);
+  }
+
+  return Math.min(Math.max(DEVICE_SCALE_FACTOR, MIN_RENDER_SCALE), MAX_RENDER_SCALE);
+}
+
 function waitForServer(url, timeoutMs = 30000) {
   const start = Date.now();
 
@@ -146,8 +157,7 @@ async function captureCanvasPngBuffer(page) {
   return Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64");
 }
 
-async function withScenePage(task) {
-  const renderScale = Math.min(Math.max(DEVICE_SCALE_FACTOR, 1), 16);
+async function withScenePage({ renderScale }, task) {
   const renderServer = createRenderServer();
   let browser;
 
@@ -192,8 +202,8 @@ async function withScenePage(task) {
   }
 }
 
-async function captureFrameBuffer({ frame }) {
-  return withScenePage(async ({ page, metadata }) => {
+async function captureFrameBuffer({ frame, renderScale }) {
+  return withScenePage({ renderScale }, async ({ page, metadata }) => {
     const clampedFrame = Math.max(0, Math.min(frame, metadata.totalFrames - 1));
 
     await page.evaluate(async (nextFrame) => {
@@ -208,8 +218,8 @@ async function captureFrameBuffer({ frame }) {
   });
 }
 
-async function captureSequenceZip({ startFrame, endFrame }) {
-  return withScenePage(async ({ page, metadata }) => {
+async function captureSequenceZip({ startFrame, endFrame, renderScale }) {
+  return withScenePage({ renderScale }, async ({ page, metadata }) => {
     const clampedStartFrame = Math.max(0, Math.min(startFrame, metadata.totalFrames - 1));
     const clampedEndFrame = Math.max(
       clampedStartFrame,
@@ -285,9 +295,11 @@ const server = http.createServer(async (request, response) => {
 
     if (pathname === "/export/frame") {
       const frame = Number(body.frame);
+      const renderScale = normalizeRenderScale(body.renderScale);
       const result = await queueExport(() =>
         captureFrameBuffer({
           frame: Number.isFinite(frame) ? Math.round(frame) : 0,
+          renderScale,
         }),
       );
 
@@ -298,10 +310,12 @@ const server = http.createServer(async (request, response) => {
     if (pathname === "/export/sequence") {
       const startFrame = Number(body.startFrame);
       const endFrame = Number(body.endFrame);
+      const renderScale = normalizeRenderScale(body.renderScale);
       const result = await queueExport(() =>
         captureSequenceZip({
           startFrame: Number.isFinite(startFrame) ? Math.round(startFrame) : 0,
           endFrame: Number.isFinite(endFrame) ? Math.round(endFrame) : 0,
+          renderScale,
         }),
       );
 

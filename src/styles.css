@@ -242,6 +242,20 @@ input[type="range"] {
   margin: 10px 0 12px;
 }
 
+.export-size-control {
+  grid-template-columns: 54px 1fr;
+  margin-bottom: 10px;
+}
+
+.export-size-control select {
+  min-height: 32px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 6px;
+  color: #eef2f7;
+  background: rgb(0 0 0 / 22%);
+  padding: 0 8px;
+}
+
 .export-controls {
   display: grid;
   grid-template-columns: 1fr 1fr;
