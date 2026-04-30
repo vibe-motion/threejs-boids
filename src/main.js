@@ -29,20 +29,20 @@ const EXPORT_WIDTH = 2048;
 const EXPORT_HEIGHT = 1152;
 const EXPORT_ASPECT_RATIO = EXPORT_WIDTH / EXPORT_HEIGHT;
 const EXPORT_RENDER_SCALES = new Set([1, 2]);
-const DEFAULT_EXPORT_RENDER_SCALE = 1;
+const DEFAULT_EXPORT_RENDER_SCALE = 2;
 const ZIP_STORE_METHOD = 0;
 const ZIP_VERSION_NEEDED = 10;
 const crc32Table = createCrc32Table();
 const MAX_TIMELINE_SECONDS = 14;
-const SELECTED_RAY_HOLD_SECONDS = 0.35;
-const CAMERA_REVEAL_BUFFER_SECONDS = 0.75;
+const TIMELINE_GAP_SECONDS = 0.5;
+const POST_AVOIDANCE_SWIM_SECONDS = 5;
 const EXPORT_SETTLE_FRAMES = 2;
 const AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE = true;
-const COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS = 0.5;
 const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
 const COLLISION_DEBUG_RAY_DELAY_SECONDS = 0.04;
 const COLLISION_DEBUG_RAY_STEP_SECONDS = 0.16;
 const COLLISION_DEBUG_RAY_GROW_SECONDS = 0.13;
+const COLLISION_DEBUG_POINT_RAY_PROGRESS = 0.82;
 const OBSTACLE_RAY_LINE_WIDTH = 4;
 const COLLISION_DEBUG_RAY_LINE_WIDTH = 3;
 const DISPLAY_MODES = {
@@ -167,8 +167,12 @@ let timelinePlaying = true;
 let applyingAbsoluteFrame = false;
 let collisionDebugLoggingEnabled = true;
 let didAutoPauseForCollisionAvoidance = false;
+let didResumeAfterCollisionAvoidance = false;
+let didFinishPostAvoidanceSwim = false;
 let collisionAvoidanceSnapshot = null;
 let collisionDebugRevealGapSeconds = 0;
+let collisionDebugRevealElapsedSeconds = 0;
+let postAvoidanceSwimElapsedSeconds = 0;
 const obstacleRay = createObstacleRay();
 const obstacleRayPose = {
   position: new THREE.Vector3(),
@@ -269,6 +273,9 @@ function bindRenderControls() {
     exportScaleSelect,
     exportStatus,
   };
+  if (exportScaleSelect) {
+    exportScaleSelect.value = String(DEFAULT_EXPORT_RENDER_SCALE);
+  }
 
   const handleFrameInput = (value) => {
     setRenderFrame(value, { playing: false });
@@ -420,6 +427,7 @@ function setSimulationPaused(paused, { syncControls = true } = {}) {
     pendingSimulationSteps = 0;
     collisionAvoidanceSnapshot = null;
     collisionDebugRevealGapSeconds = 0;
+    collisionDebugRevealElapsedSeconds = 0;
     collisionDebugOverlay.reset();
   }
   if (syncControls) {
@@ -507,16 +515,19 @@ function stepTimelineFrame(frameDt, options = {}) {
       simulation.fish[fishConfig.highlightedIndex],
       simulationDt,
     );
+    updatePostAvoidanceSwimTimer(simulationDt);
   }
 
   updateObstacleRay();
   cameraRig.update(frameDt);
   const collisionDebugSnapshot = simulationPaused ? collisionAvoidanceSnapshot : null;
+  const revealCollisionDebugRays = shouldRevealCollisionDebugRays(frameDt);
   collisionDebugOverlay.update(
     collisionDebugSnapshot,
     frameDt,
-    shouldRevealCollisionDebugRays(frameDt),
+    revealCollisionDebugRays,
   );
+  updateCollisionDebugResume(revealCollisionDebugRays, frameDt);
   cameraPanel.update();
 }
 
@@ -571,8 +582,12 @@ function resetTimelineState() {
   simulationTime = 0;
   pendingSimulationSteps = 0;
   didAutoPauseForCollisionAvoidance = false;
+  didResumeAfterCollisionAvoidance = false;
+  didFinishPostAvoidanceSwim = false;
   collisionAvoidanceSnapshot = null;
   collisionDebugRevealGapSeconds = 0;
+  collisionDebugRevealElapsedSeconds = 0;
+  postAvoidanceSwimElapsedSeconds = 0;
   simulationPaused = false;
   collisionDebugOverlay.reset();
   applySimulationSettingsFromControls();
@@ -619,16 +634,8 @@ function computeRenderTimelineTotalFrames() {
         logDebug: false,
       });
 
-      if (didAutoPauseForCollisionAvoidance && collisionAvoidanceSnapshot) {
-        const selectedIndex = readSelectedCollisionCandidateIndex(collisionAvoidanceSnapshot);
-        const revealSeconds =
-          COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS
-          + selectedIndex * COLLISION_DEBUG_RAY_STEP_SECONDS
-          + COLLISION_DEBUG_RAY_DELAY_SECONDS
-          + COLLISION_DEBUG_RAY_GROW_SECONDS
-          + CAMERA_REVEAL_BUFFER_SECONDS
-          + SELECTED_RAY_HOLD_SECONDS;
-        return frame + Math.ceil(revealSeconds * RENDER_FPS) + 1;
+      if (didFinishPostAvoidanceSwim) {
+        return frame + 1;
       }
     }
   } finally {
@@ -678,8 +685,12 @@ function maybePauseForFirstCollisionAvoidance(options = {}) {
     options,
   );
   didAutoPauseForCollisionAvoidance = true;
+  didResumeAfterCollisionAvoidance = false;
+  didFinishPostAvoidanceSwim = false;
   pendingSimulationSteps = 0;
-  collisionDebugRevealGapSeconds = COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS;
+  collisionDebugRevealGapSeconds = TIMELINE_GAP_SECONDS;
+  collisionDebugRevealElapsedSeconds = 0;
+  postAvoidanceSwimElapsedSeconds = 0;
   setSimulationPaused(true, {
     syncControls: !applyingAbsoluteFrame,
   });
@@ -693,7 +704,7 @@ function shouldRevealCollisionDebugRays(dt) {
   }
 
   if (cameraRig.isOrbitViewTransitionActive) {
-    collisionDebugRevealGapSeconds = COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS;
+    collisionDebugRevealGapSeconds = TIMELINE_GAP_SECONDS;
     return false;
   }
 
@@ -703,6 +714,47 @@ function shouldRevealCollisionDebugRays(dt) {
   }
 
   return true;
+}
+
+function updateCollisionDebugResume(revealRays, dt) {
+  if (!simulationPaused || !collisionAvoidanceSnapshot || !revealRays) {
+    return;
+  }
+
+  collisionDebugRevealElapsedSeconds += dt;
+  const resumeAfterSeconds =
+    readSelectedCollisionDebugRevealSeconds(collisionAvoidanceSnapshot)
+    + TIMELINE_GAP_SECONDS;
+
+  if (collisionDebugRevealElapsedSeconds < resumeAfterSeconds) {
+    return;
+  }
+
+  didResumeAfterCollisionAvoidance = true;
+  setSimulationPaused(false, {
+    syncControls: !applyingAbsoluteFrame,
+  });
+}
+
+function updatePostAvoidanceSwimTimer(dt) {
+  if (!didResumeAfterCollisionAvoidance || didFinishPostAvoidanceSwim) {
+    return;
+  }
+
+  postAvoidanceSwimElapsedSeconds += dt;
+  if (postAvoidanceSwimElapsedSeconds >= POST_AVOIDANCE_SWIM_SECONDS) {
+    didFinishPostAvoidanceSwim = true;
+  }
+}
+
+function readSelectedCollisionDebugRevealSeconds(snapshot) {
+  const selectedIndex = readSelectedCollisionCandidateIndex(snapshot);
+  const pointRevealSeconds =
+    COLLISION_DEBUG_RAY_GROW_SECONDS * COLLISION_DEBUG_POINT_RAY_PROGRESS
+    + COLLISION_DEBUG_POINT_GROW_SECONDS;
+  return selectedIndex * COLLISION_DEBUG_RAY_STEP_SECONDS
+    + COLLISION_DEBUG_RAY_DELAY_SECONDS
+    + Math.max(COLLISION_DEBUG_RAY_GROW_SECONDS, pointRevealSeconds);
 }
 
 function attachCollisionDebugVisualOrigin(snapshot, { exposeDebug = true, logDebug = true } = {}) {
@@ -870,14 +922,17 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
           logCollisionCandidate(snapshot, candidate, i);
         }
 
-        const pointProgress = easeOutBack(
-          clamp01(candidateElapsed / COLLISION_DEBUG_POINT_GROW_SECONDS),
-        );
         const rayProgress = easeOutCubic(
           clamp01(
             (candidateElapsed - COLLISION_DEBUG_RAY_DELAY_SECONDS)
               / COLLISION_DEBUG_RAY_GROW_SECONDS,
           ),
+        );
+        const pointElapsed = candidateElapsed
+          - COLLISION_DEBUG_RAY_DELAY_SECONDS
+          - COLLISION_DEBUG_RAY_GROW_SECONDS * COLLISION_DEBUG_POINT_RAY_PROGRESS;
+        const pointProgress = easeOutBack(
+          clamp01(pointElapsed / COLLISION_DEBUG_POINT_GROW_SECONDS),
         );
 
         const color = readCollisionCandidateColor(candidate);
@@ -1133,7 +1188,7 @@ function readRenderOptions(params) {
     isExportMode: exportMode === "transparent" || exportMode === "composite-transparent",
     renderScale: Number.isFinite(renderScale)
       ? THREE.MathUtils.clamp(renderScale, 1, 16)
-      : 1,
+      : DEFAULT_EXPORT_RENDER_SCALE,
   };
 }
 

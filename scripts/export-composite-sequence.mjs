@@ -14,7 +14,7 @@ const HOST = "127.0.0.1";
 const PORT = Number(process.env.SCENE_EXPORT_PORT || 4173);
 const VIEWPORT_WIDTH = Number(process.env.SCENE_EXPORT_VIEWPORT_WIDTH || 2048);
 const VIEWPORT_HEIGHT = Number(process.env.SCENE_EXPORT_VIEWPORT_HEIGHT || 1152);
-const DEVICE_SCALE_FACTOR = Number(process.env.SCENE_EXPORT_DEVICE_SCALE_FACTOR || 1);
+const DEVICE_SCALE_FACTOR = Number(process.env.SCENE_EXPORT_DEVICE_SCALE_FACTOR || 2);
 const OUTPUT_DIR = path.resolve(
   appDir,
   process.env.SCENE_EXPORT_OUTPUT_DIR || "renders/boids-frames",
