@@ -11,7 +11,7 @@ export const fishConfig = {
   radialSegments: 36,
   heightSegments: 3,
   highlightedIndex: 0,
-  bodyColor: new THREE.Color(0x7c6dff),
+  bodyColor: new THREE.Color(0xf2f6ff),
   highlightedColor: new THREE.Color(0xfff000),
 };
 
