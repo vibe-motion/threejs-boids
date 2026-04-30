@@ -16,7 +16,10 @@
   </head>
   <body>
     <main id="app">
-      <canvas id="scene"></canvas>
+      <section id="preview-shell" class="preview-shell" aria-label="16:9 scene preview">
+        <canvas id="scene" class="scene-canvas"></canvas>
+        <div class="camera-frame" aria-hidden="true"></div>
+      </section>
       <section class="panel" aria-label="Fish tank controls">
         <div class="playback-controls" aria-label="Simulation playback controls">
           <button id="playback-toggle" class="toggle-button" type="button" aria-pressed="false">
@@ -75,6 +78,20 @@
         </div>
 
         <p id="copy-camera-status" class="copy-status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel render-panel" aria-label="Render controls">
+        <label class="frame-control">
+          Frame
+          <input id="render-frame" type="number" min="0" step="1" value="0" />
+          <output id="render-frame-count">1 / 1</output>
+        </label>
+        <input id="render-frame-range" class="frame-range" type="range" min="0" max="0" step="1" value="0" />
+        <div class="export-controls">
+          <button id="export-frame" type="button">Export PNG</button>
+          <button id="export-sequence" type="button">Export ZIP</button>
+        </div>
+        <div id="export-status" class="export-status" role="status" aria-live="polite"></div>
       </section>
     </main>
     <script type="module" src="./src/main.js"></script>

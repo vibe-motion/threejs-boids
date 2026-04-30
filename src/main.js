@@ -19,6 +19,15 @@ import {
 } from "./scene-setup.js";
 
 const STEP_FRAME_SECONDS = 1 / 60;
+const RENDER_FPS = 60;
+const EXPORT_WIDTH = 2048;
+const EXPORT_HEIGHT = 1152;
+const EXPORT_ASPECT_RATIO = EXPORT_WIDTH / EXPORT_HEIGHT;
+const EXPORT_API_PORT = 4174;
+const MAX_TIMELINE_SECONDS = 14;
+const SELECTED_RAY_HOLD_SECONDS = 0.35;
+const CAMERA_REVEAL_BUFFER_SECONDS = 0.75;
+const EXPORT_SETTLE_FRAMES = 2;
 const AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE = true;
 const COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS = 0.5;
 const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
@@ -61,12 +70,13 @@ const textInputTypes = new Set([
   "week",
 ]);
 const app = getRequiredElement("#app");
+const previewShell = getRequiredElement("#preview-shell");
 const canvas = getRequiredElement("#scene");
 const renderer = createRenderer(canvas);
 const scene = createScene();
-const clock = new THREE.Clock();
 const cameraRig = createCameraRig(renderer);
 const query = new URLSearchParams(window.location.search);
+const renderOptions = readRenderOptions(query);
 const headingDebugger = createHeadingDebugger({
   enabled: query.get("debugHeading") === "1",
   frameLimit: Number(query.get("debugFrames")) || undefined,
@@ -132,11 +142,19 @@ const introCameraView = {
   speed: INTRO_CAMERA_SPEED,
 };
 
+let timelineStartCameraView = cameraViewPresets.z;
+let timelineIntroCameraEnabled = true;
 let fishMesh = null;
 let simulationPaused = false;
 let pendingSimulationSteps = 0;
 let simulationTime = 0;
 let playbackControls = null;
+let renderControls = null;
+let currentRenderFrame = 0;
+let renderTimelineTotalFrames = 1;
+let timelinePlaying = true;
+let applyingAbsoluteFrame = false;
+let collisionDebugLoggingEnabled = true;
 let didAutoPauseForCollisionAvoidance = false;
 let collisionAvoidanceSnapshot = null;
 let collisionDebugRevealGapSeconds = 0;
@@ -158,9 +176,11 @@ const worldAxes = addWorldAxes(scene);
 scene.add(obstacleRay);
 scene.add(collisionDebugOverlay.group);
 const obstacleMeshes = addObstacles(scene, obstacles);
+applyRenderLayout();
 applySimulationSettingsFromControls();
 bindControls();
 bindPlaybackControls();
+bindRenderControls();
 bindDisplayModeControls();
 bindCameraToggle(cameraRig);
 bindObstacleKeyboardControls(obstacleMeshes);
@@ -172,6 +192,8 @@ const cameraPanel = bindCameraPanel(cameraRig);
 simulation.reset(readControlValue("count"));
 rebuildFishMesh();
 resize();
+refreshRenderTimeline({ frame: 0, playing: true });
+installSceneExportBridge();
 window.addEventListener("resize", resize);
 renderer.setAnimationLoop(animate);
 
@@ -191,7 +213,7 @@ function bindPlaybackControls() {
   playbackControls = { toggleButton, stepButton };
 
   const togglePlayback = () => {
-    setSimulationPaused(!simulationPaused);
+    setTimelinePlaying(!timelinePlaying);
   };
 
   toggleButton.addEventListener("click", togglePlayback);
@@ -206,12 +228,53 @@ function bindPlaybackControls() {
   });
 
   stepButton.addEventListener("click", () => {
-    if (!simulationPaused) return;
+    if (timelinePlaying) return;
 
-    pendingSimulationSteps += 1;
+    setRenderFrame(currentRenderFrame + 1, { playing: false });
   });
 
   syncPlaybackControls();
+}
+
+function bindRenderControls() {
+  const frameInput = getOptionalInput("#render-frame");
+  const frameRange = getOptionalInput("#render-frame-range");
+  const frameCount = getOptionalElement("#render-frame-count");
+  const exportFrameButton = getOptionalElement("#export-frame");
+  const exportSequenceButton = getOptionalElement("#export-sequence");
+  const exportStatus = getOptionalElement("#export-status");
+
+  if (!frameInput || !frameRange || !frameCount) {
+    return;
+  }
+
+  renderControls = {
+    frameInput,
+    frameRange,
+    frameCount,
+    exportFrameButton,
+    exportSequenceButton,
+    exportStatus,
+  };
+
+  const handleFrameInput = (value) => {
+    setRenderFrame(value, { playing: false });
+  };
+
+  frameInput.addEventListener("change", () => {
+    handleFrameInput(readInputNumber(frameInput));
+  });
+  frameRange.addEventListener("input", () => {
+    handleFrameInput(readInputNumber(frameRange));
+  });
+  exportFrameButton?.addEventListener("click", () => {
+    void exportCurrentFrame();
+  });
+  exportSequenceButton?.addEventListener("click", () => {
+    void exportSequence();
+  });
+
+  syncRenderControls();
 }
 
 function bindDisplayModeControls() {
@@ -288,7 +351,10 @@ function bindCameraViewControls(rig) {
       const preset = cameraViewPresets[button.dataset.cameraView];
       if (!preset) return;
 
+      timelineStartCameraView = preset;
+      timelineIntroCameraEnabled = false;
       rig.setOrbitView(preset);
+      setRenderFrame(currentRenderFrame, { playing: false });
     });
   }
 }
@@ -314,6 +380,7 @@ function moveObstacle({ obstacle, mesh }, code) {
   }
 
   mesh.position.copy(obstacle.position);
+  refreshRenderTimeline({ frame: 0, playing: timelinePlaying });
 }
 
 function isEditingText(target) {
@@ -329,12 +396,12 @@ function syncPlaybackControls() {
   if (!playbackControls) return;
 
   const { toggleButton, stepButton } = playbackControls;
-  toggleButton.textContent = simulationPaused ? "Resume" : "Pause";
-  toggleButton.setAttribute("aria-pressed", String(simulationPaused));
-  stepButton.disabled = !simulationPaused;
+  toggleButton.textContent = timelinePlaying ? "Pause" : "Resume";
+  toggleButton.setAttribute("aria-pressed", String(!timelinePlaying));
+  stepButton.disabled = timelinePlaying;
 }
 
-function setSimulationPaused(paused) {
+function setSimulationPaused(paused, { syncControls = true } = {}) {
   simulationPaused = paused;
   if (!simulationPaused) {
     pendingSimulationSteps = 0;
@@ -342,7 +409,9 @@ function setSimulationPaused(paused) {
     collisionDebugRevealGapSeconds = 0;
     collisionDebugOverlay.reset();
   }
-  syncPlaybackControls();
+  if (syncControls) {
+    syncPlaybackControls();
+  }
 }
 
 function applyControlChange(key) {
@@ -353,10 +422,12 @@ function applyControlChange(key) {
 
   if (key === "light") {
     lighting.setIntensity(readControlValue(key));
+    renderCurrentFrame();
     return;
   }
 
   applySimulationSettingsFromControls();
+  refreshRenderTimeline({ frame: 0, playing: timelinePlaying });
 }
 
 function applySimulationSettingsFromControls() {
@@ -371,6 +442,7 @@ function setFishCount(count) {
   collisionAvoidanceSnapshot = null;
   collisionDebugOverlay.reset();
   rebuildFishMesh();
+  refreshRenderTimeline({ frame: 0, playing: timelinePlaying });
 }
 
 function rebuildFishMesh() {
@@ -386,8 +458,16 @@ function rebuildFishMesh() {
 }
 
 function animate() {
-  const frameDt = Math.min(clock.getDelta(), 1 / 30);
-  const simulationDt = maybePauseForFirstCollisionAvoidance()
+  if (timelinePlaying) {
+    const nextFrame = currentRenderFrame >= renderTimelineTotalFrames - 1
+      ? 0
+      : currentRenderFrame + 1;
+    setRenderFrame(nextFrame, { playing: true });
+  }
+}
+
+function stepTimelineFrame(frameDt, options = {}) {
+  const simulationDt = maybePauseForFirstCollisionAvoidance(options)
     ? 0
     : getSimulationDelta(frameDt);
   let trace = null;
@@ -400,6 +480,7 @@ function animate() {
     if (trace?.collisionAvoidanceSnapshot) {
       collisionAvoidanceSnapshot = attachCollisionDebugVisualOrigin(
         trace.collisionAvoidanceSnapshot,
+        options,
       );
     }
     updateFishInstances(fishMesh, simulation.fish);
@@ -424,10 +505,144 @@ function animate() {
     shouldRevealCollisionDebugRays(frameDt),
   );
   cameraPanel.update();
-  renderer.render(scene, cameraRig.activeCamera);
 }
 
-function maybePauseForFirstCollisionAvoidance() {
+function renderCurrentFrame() {
+  renderAbsoluteFrame(currentRenderFrame);
+}
+
+function setTimelinePlaying(playing) {
+  timelinePlaying = Boolean(playing);
+  syncPlaybackControls();
+  syncRenderControls();
+}
+
+function setRenderFrame(frame, { playing = timelinePlaying } = {}) {
+  currentRenderFrame = clampFrame(frame, renderTimelineTotalFrames);
+  timelinePlaying = Boolean(playing);
+  renderCurrentFrame();
+  syncPlaybackControls();
+  syncRenderControls();
+}
+
+function renderAbsoluteFrame(frame, {
+  exposeDebug = !renderOptions.isExportMode,
+  logDebug = false,
+  render = true,
+} = {}) {
+  const clampedFrame = clampFrame(frame, renderTimelineTotalFrames);
+  const previousLoggingEnabled = collisionDebugLoggingEnabled;
+  applyingAbsoluteFrame = true;
+  collisionDebugLoggingEnabled = logDebug;
+
+  try {
+    resetTimelineState();
+    for (let i = 0; i < clampedFrame; i += 1) {
+      stepTimelineFrame(STEP_FRAME_SECONDS, {
+        exposeDebug,
+        logDebug,
+      });
+    }
+    updateObstacleRay();
+    cameraPanel.update();
+    if (render) {
+      renderer.render(scene, cameraRig.activeCamera);
+    }
+  } finally {
+    collisionDebugLoggingEnabled = previousLoggingEnabled;
+    applyingAbsoluteFrame = false;
+  }
+}
+
+function resetTimelineState() {
+  simulationTime = 0;
+  pendingSimulationSteps = 0;
+  didAutoPauseForCollisionAvoidance = false;
+  collisionAvoidanceSnapshot = null;
+  collisionDebugRevealGapSeconds = 0;
+  simulationPaused = false;
+  collisionDebugOverlay.reset();
+  applySimulationSettingsFromControls();
+  simulation.reset(readControlValue("count"));
+  syncFishMeshWithSimulation();
+  aquariumEffects.update(0);
+  cameraRig.setOrbitView(timelineStartCameraView);
+  if (timelineIntroCameraEnabled) {
+    cameraRig.flyToOrbitView(introCameraView);
+  }
+  cameraRig.updateFishCamera(simulation.fish[fishConfig.highlightedIndex], 0);
+  updateObstacleRay();
+}
+
+function syncFishMeshWithSimulation() {
+  if (!fishMesh || fishMesh.count !== simulation.fish.length) {
+    rebuildFishMesh();
+    return;
+  }
+
+  updateFishInstances(fishMesh, simulation.fish);
+}
+
+function refreshRenderTimeline({ frame = currentRenderFrame, playing = timelinePlaying } = {}) {
+  renderTimelineTotalFrames = computeRenderTimelineTotalFrames();
+  currentRenderFrame = clampFrame(frame, renderTimelineTotalFrames);
+  timelinePlaying = Boolean(playing);
+  renderCurrentFrame();
+  syncPlaybackControls();
+  syncRenderControls();
+}
+
+function computeRenderTimelineTotalFrames() {
+  const maxFrames = Math.ceil(MAX_TIMELINE_SECONDS * RENDER_FPS);
+  const previousLoggingEnabled = collisionDebugLoggingEnabled;
+  applyingAbsoluteFrame = true;
+  collisionDebugLoggingEnabled = false;
+
+  try {
+    resetTimelineState();
+    for (let frame = 0; frame < maxFrames; frame += 1) {
+      stepTimelineFrame(STEP_FRAME_SECONDS, {
+        exposeDebug: false,
+        logDebug: false,
+      });
+
+      if (didAutoPauseForCollisionAvoidance && collisionAvoidanceSnapshot) {
+        const selectedIndex = readSelectedCollisionCandidateIndex(collisionAvoidanceSnapshot);
+        const revealSeconds =
+          COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS
+          + selectedIndex * COLLISION_DEBUG_RAY_STEP_SECONDS
+          + COLLISION_DEBUG_RAY_DELAY_SECONDS
+          + COLLISION_DEBUG_RAY_GROW_SECONDS
+          + CAMERA_REVEAL_BUFFER_SECONDS
+          + SELECTED_RAY_HOLD_SECONDS;
+        return frame + Math.ceil(revealSeconds * RENDER_FPS) + 1;
+      }
+    }
+  } finally {
+    collisionDebugLoggingEnabled = previousLoggingEnabled;
+    applyingAbsoluteFrame = false;
+  }
+
+  return maxFrames;
+}
+
+function readSelectedCollisionCandidateIndex(snapshot) {
+  const selectedIndex = snapshot.visualSelectedIndex >= 0
+    ? snapshot.visualSelectedIndex
+    : snapshot.selectedIndex;
+  return Math.max(0, selectedIndex);
+}
+
+function clampFrame(frame, totalFrames = renderTimelineTotalFrames) {
+  const maxFrame = Math.max(0, totalFrames - 1);
+  if (!Number.isFinite(frame)) {
+    return 0;
+  }
+
+  return THREE.MathUtils.clamp(Math.round(frame), 0, maxFrame);
+}
+
+function maybePauseForFirstCollisionAvoidance(options = {}) {
   if (!AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE || didAutoPauseForCollisionAvoidance) {
     return false;
   }
@@ -447,11 +662,14 @@ function maybePauseForFirstCollisionAvoidance() {
       fish.position,
       collisionProbeDirection,
     ),
+    options,
   );
   didAutoPauseForCollisionAvoidance = true;
   pendingSimulationSteps = 0;
   collisionDebugRevealGapSeconds = COLLISION_DEBUG_RAY_REVEAL_GAP_SECONDS;
-  setSimulationPaused(true);
+  setSimulationPaused(true, {
+    syncControls: !applyingAbsoluteFrame,
+  });
   return true;
 }
 
@@ -474,7 +692,7 @@ function shouldRevealCollisionDebugRays(dt) {
   return true;
 }
 
-function attachCollisionDebugVisualOrigin(snapshot) {
+function attachCollisionDebugVisualOrigin(snapshot, { exposeDebug = true, logDebug = true } = {}) {
   snapshot.visualOrigin = snapshot.origin
     .clone()
     .addScaledVector(snapshot.forward, fishConfig.length / 2);
@@ -509,8 +727,12 @@ function attachCollisionDebugVisualOrigin(snapshot) {
     }
   }
 
-  window.collisionAvoidanceSnapshot = snapshot;
-  logCollisionAvoidanceSnapshot(snapshot);
+  if (exposeDebug) {
+    window.collisionAvoidanceSnapshot = snapshot;
+  }
+  if (logDebug) {
+    logCollisionAvoidanceSnapshot(snapshot);
+  }
   return snapshot;
 }
 
@@ -629,7 +851,7 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
         if (candidateElapsed <= 0) {
           break;
         }
-        if (i >= loggedCandidateCount) {
+        if (collisionDebugLoggingEnabled && i >= loggedCandidateCount) {
           logCollisionCandidate(snapshot, candidate, i);
         }
 
@@ -848,11 +1070,94 @@ function getSimulationDelta(frameDt) {
 }
 
 function resize() {
-  const width = Math.max(1, window.innerWidth);
-  const height = Math.max(1, window.innerHeight);
+  const { width, height, pixelRatio } = readRenderSize();
+  renderer.setPixelRatio(pixelRatio);
   cameraRig.resize(width, height);
   renderer.setSize(width, height, false);
   cameraPanel.update();
+  renderCurrentFrame();
+}
+
+function readRenderSize() {
+  if (renderOptions.isExportMode) {
+    return {
+      width: Math.round(EXPORT_WIDTH * renderOptions.renderScale),
+      height: Math.round(EXPORT_HEIGHT * renderOptions.renderScale),
+      pixelRatio: 1,
+    };
+  }
+
+  return {
+    width: Math.max(1, Math.round(canvas.clientWidth || window.innerWidth)),
+    height: Math.max(1, Math.round(canvas.clientHeight || window.innerHeight)),
+    pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+  };
+}
+
+function applyRenderLayout() {
+  if (!renderOptions.isExportMode) {
+    return;
+  }
+
+  app.classList.add("app-export");
+  app.dataset.uiPanels = "hidden";
+  const width = Math.round(EXPORT_WIDTH * renderOptions.renderScale);
+  const height = Math.round(EXPORT_HEIGHT * renderOptions.renderScale);
+  previewShell.style.width = `${width}px`;
+  previewShell.style.height = `${height}px`;
+}
+
+function readRenderOptions(params) {
+  const exportMode = params.get("exportMode");
+  const renderScale = Number(params.get("renderScale"));
+
+  return {
+    isExportMode: exportMode === "transparent" || exportMode === "composite-transparent",
+    renderScale: Number.isFinite(renderScale)
+      ? THREE.MathUtils.clamp(renderScale, 1, 16)
+      : 1,
+  };
+}
+
+function installSceneExportBridge() {
+  window.__SCENE_3D_EXPORT__ = {
+    getCurrentFrame: () => currentRenderFrame,
+    getTotalFrames: () => renderTimelineTotalFrames,
+    getSize: () => ({
+      width: EXPORT_WIDTH,
+      height: EXPORT_HEIGHT,
+      aspectRatio: EXPORT_ASPECT_RATIO,
+      fps: RENDER_FPS,
+    }),
+    setFrame: async (frame) => {
+      const clampedFrame = clampFrame(frame, renderTimelineTotalFrames);
+      currentRenderFrame = clampedFrame;
+      timelinePlaying = false;
+      renderAbsoluteFrame(clampedFrame, {
+        exposeDebug: false,
+        logDebug: false,
+      });
+      syncPlaybackControls();
+      syncRenderControls();
+      await waitForAnimationFrames(EXPORT_SETTLE_FRAMES);
+      return clampedFrame;
+    },
+  };
+}
+
+function waitForAnimationFrames(frameCount = 1) {
+  return new Promise((resolve) => {
+    let remaining = Math.max(1, frameCount);
+    const tick = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        resolve();
+        return;
+      }
+      window.requestAnimationFrame(tick);
+    };
+    window.requestAnimationFrame(tick);
+  });
 }
 
 function bindCameraPanel(rig) {
@@ -939,6 +1244,109 @@ function roundCameraNumber(value) {
   return Number(value.toFixed(4));
 }
 
+function syncRenderControls() {
+  if (!renderControls) return;
+
+  const maxFrame = Math.max(0, renderTimelineTotalFrames - 1);
+  renderControls.frameInput.max = String(maxFrame);
+  renderControls.frameInput.value = String(currentRenderFrame);
+  renderControls.frameRange.max = String(maxFrame);
+  renderControls.frameRange.value = String(currentRenderFrame);
+  renderControls.frameCount.value =
+    `${currentRenderFrame + 1} / ${renderTimelineTotalFrames}`;
+  const exportDisabled = renderOptions.isExportMode;
+  if (renderControls.exportFrameButton) {
+    renderControls.exportFrameButton.disabled = exportDisabled;
+  }
+  if (renderControls.exportSequenceButton) {
+    renderControls.exportSequenceButton.disabled = exportDisabled;
+  }
+}
+
+async function exportCurrentFrame() {
+  await requestExport({
+    endpoint: "/export/frame",
+    body: {
+      frame: currentRenderFrame,
+    },
+    filename: `boids-frame-${String(currentRenderFrame).padStart(4, "0")}.png`,
+    loadingMessage: `Exporting frame ${currentRenderFrame + 1}/${renderTimelineTotalFrames}...`,
+    successMessage: "PNG exported.",
+  });
+}
+
+async function exportSequence() {
+  await requestExport({
+    endpoint: "/export/sequence",
+    body: {
+      startFrame: 0,
+      endFrame: renderTimelineTotalFrames - 1,
+    },
+    filename: `boids-frames-${String(renderTimelineTotalFrames).padStart(4, "0")}.zip`,
+    loadingMessage: `Exporting ${renderTimelineTotalFrames} frames...`,
+    successMessage: "ZIP exported.",
+  });
+}
+
+async function requestExport({ endpoint, body, loadingMessage, successMessage }) {
+  if (!renderControls?.exportStatus) return;
+
+  const status = renderControls.exportStatus;
+  setExportButtonsDisabled(true);
+  status.textContent = loadingMessage;
+
+  try {
+    const response = await fetch(`${readExportApiBaseUrl()}${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error((await response.text()) || `Export request failed with ${response.status}`);
+    }
+
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const filename = readAttachmentFileName(disposition) ?? "boids-render.png";
+    downloadBlob(await response.blob(), filename);
+    status.textContent = successMessage;
+  } catch (error) {
+    status.textContent = `Export failed: ${error.message}`;
+  } finally {
+    setExportButtonsDisabled(false);
+  }
+}
+
+function setExportButtonsDisabled(disabled) {
+  if (!renderControls) return;
+  if (renderControls.exportFrameButton) {
+    renderControls.exportFrameButton.disabled = disabled || renderOptions.isExportMode;
+  }
+  if (renderControls.exportSequenceButton) {
+    renderControls.exportSequenceButton.disabled = disabled || renderOptions.isExportMode;
+  }
+}
+
+function readExportApiBaseUrl() {
+  return `http://${window.location.hostname || "127.0.0.1"}:${EXPORT_API_PORT}`;
+}
+
+function downloadBlob(blob, filename) {
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+}
+
+function readAttachmentFileName(disposition) {
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  return match?.[1] ?? null;
+}
+
 function createControl(inputSelector, outputSelector) {
   return {
     input: getRequiredInput(inputSelector),
@@ -973,8 +1381,25 @@ function getRequiredElement(selector) {
   return element;
 }
 
+function getOptionalElement(selector) {
+  return document.querySelector(selector);
+}
+
 function getRequiredInput(selector) {
   const element = getRequiredElement(selector);
+
+  if (!(element instanceof HTMLInputElement)) {
+    throw new Error(`Expected ${selector} to be an input element.`);
+  }
+
+  return element;
+}
+
+function getOptionalInput(selector) {
+  const element = getOptionalElement(selector);
+  if (!element) {
+    return null;
+  }
 
   if (!(element instanceof HTMLInputElement)) {
     throw new Error(`Expected ${selector} to be an input element.`);

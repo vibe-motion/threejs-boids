@@ -10,6 +10,7 @@ export function createRenderer(canvas) {
     canvas,
     antialias: true,
     powerPreference: "high-performance",
+    preserveDrawingBuffer: true,
   });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
