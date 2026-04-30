@@ -10,6 +10,7 @@ const aquariumEdgeMarkerOffset = 0.48;
 const aquariumEdgeMarkerScale = 0.68;
 const obstacleOutlineScale = new THREE.Vector3(1.035, 1.035, 1.035);
 const sceneBackgroundColor = new THREE.Color(0x5d646c);
+const aquariumFloorColor = 0x050505;
 
 export function createRenderer(canvas) {
   if (!canvas) {
@@ -87,7 +88,7 @@ export function addAquarium(scene) {
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(aquariumSize.x, aquariumSize.z),
     new THREE.MeshStandardMaterial({
-      color: 0x2f2f2f,
+      color: aquariumFloorColor,
       roughness: 0.9,
       metalness: 0,
     }),
@@ -100,7 +101,7 @@ export function addAquarium(scene) {
   const floorEdges = new THREE.LineSegments(
     new THREE.EdgesGeometry(floor.geometry),
     new THREE.LineBasicMaterial({
-      color: 0x78b6c7,
+      color: aquariumFloorColor,
       transparent: true,
       opacity: 0.5,
     }),
@@ -135,7 +136,7 @@ function createAquariumEdges() {
   geometry.setPositions(createBoxEdgePositions(aquariumSize));
 
   const material = new LineMaterial({
-    color: 0x101010,
+    color: 0xffffff,
     linewidth: aquariumBoxLineWidth,
     worldUnits: true,
     depthTest: true,
