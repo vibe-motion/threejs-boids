@@ -77,8 +77,11 @@ export function addAquarium(scene) {
   const aquariumEdges = createAquariumEdges();
   group.add(aquariumEdges);
 
-  if (showAquariumEdgeMarkers) {
-    group.add(createAquariumEdgeMarkers());
+  const aquariumEdgeMarkers = showAquariumEdgeMarkers
+    ? createAquariumEdgeMarkers()
+    : null;
+  if (aquariumEdgeMarkers) {
+    group.add(aquariumEdgeMarkers);
   }
 
   const floor = new THREE.Mesh(
@@ -118,6 +121,11 @@ export function addAquarium(scene) {
     },
     setResolution(width, height) {
       aquariumEdges.material.resolution.set(width, height);
+    },
+    setEdgeMarkersVisible(visible) {
+      if (aquariumEdgeMarkers) {
+        aquariumEdgeMarkers.visible = visible;
+      }
     },
   };
 }

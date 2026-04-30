@@ -354,6 +354,7 @@ function applySceneObjectsVisibility(visible) {
 
 function applyWorldAxesVisibility(visible) {
   worldAxes.visible = visible;
+  aquariumEffects.setEdgeMarkersVisible(visible);
 }
 
 function bindObstacleKeyboardControls(obstacleMeshes) {
