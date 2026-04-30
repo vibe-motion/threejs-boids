@@ -6,7 +6,7 @@ export const aquariumFloorY = -aquariumHalfSize.y;
 export const waterLevelY = aquariumHalfSize.y - 0.72;
 
 export const fishConfig = {
-  radius: 0.18,
+  radius: 0.3,
   length: 0.8,
   radialSegments: 14,
   highlightedIndex: 0,
