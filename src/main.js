@@ -551,15 +551,10 @@ function stepTimelineFrame(frameDt, options = {}) {
 
   if (simulationDt > 0) {
     simulationTime += simulationDt;
-    trace = simulation.update(simulationDt, {
-      traceIndex: headingDebugger?.traceIndex ?? fishConfig.highlightedIndex,
-    });
-    if (trace?.collisionAvoidanceSnapshot) {
-      collisionAvoidanceSnapshot = attachCollisionDebugVisualOrigin(
-        trace.collisionAvoidanceSnapshot,
-        options,
-      );
-    }
+    trace = simulation.update(
+      simulationDt,
+      headingDebugger ? { traceIndex: headingDebugger.traceIndex } : undefined,
+    );
     updateFishInstances(fishMesh, simulation.fish);
     aquariumEffects.update(simulationTime);
     headingDebugger?.sample({

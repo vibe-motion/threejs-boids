@@ -4,6 +4,8 @@ import {
   mulberry32,
 } from "./random.js";
 
+const MIN_CACHED_CLEAR_DIRECTION_DOT = 0.5;
+
 export class FishSchoolSimulation {
   constructor({ aquariumHalfSize, obstacles, settings }) {
     this.aquariumHalfSize = aquariumHalfSize;
@@ -56,6 +58,7 @@ export class FishSchoolSimulation {
     return {
       position,
       velocity: direction.multiplyScalar(speed),
+      collisionAvoidanceDirection: null,
     };
   }
 
@@ -96,7 +99,6 @@ export class FishSchoolSimulation {
       let neighborCount = 0;
       let collisionAvoidanceActive = false;
       let boundaryAvoidanceActive = false;
-      let collisionAvoidanceSnapshot = null;
 
       for (let j = 0; j < this.fish.length; j += 1) {
         if (i === j) continue;
@@ -148,14 +150,7 @@ export class FishSchoolSimulation {
       const forward = this.tmpVecB.copy(fish.velocity).normalize();
       if (this.isHeadingForCollision(fish.position, forward)) {
         collisionAvoidanceActive = true;
-        if (components) {
-          collisionAvoidanceSnapshot = this.createCollisionAvoidanceSnapshot(
-            fish.position,
-            forward,
-          );
-        }
-        const clearDirection = collisionAvoidanceSnapshot?.selectedDirection
-          ?? this.obstacleRays(fish.position, forward);
+        const clearDirection = this.obstacleRays(fish.position, forward, fish);
         const obstacle = this.steerTowards(
           clearDirection,
           fish.velocity,
@@ -166,6 +161,8 @@ export class FishSchoolSimulation {
         if (components) {
           components.obstacle.copy(obstacle);
         }
+      } else {
+        fish.collisionAvoidanceDirection = null;
       }
 
       const boundary = this.aquariumBoundarySteer(fish.position, this.settings.boundaryMargin);
@@ -201,7 +198,6 @@ export class FishSchoolSimulation {
           neighborCount,
           collisionAvoidanceActive,
           boundaryAvoidanceActive,
-          collisionAvoidanceSnapshot,
           previousVelocity: fish.velocity.clone(),
           nextVelocity: velocity.clone(),
         };
@@ -252,19 +248,41 @@ export class FishSchoolSimulation {
   }
 
   isHeadingForCollision(position, forward) {
-    if (this.rayHitsObstacle(position, forward, this.settings.collisionAvoidDistance)) {
-      return true;
-    }
-
     const end = this.tmpVecA.copy(position).addScaledVector(
       forward,
       this.settings.collisionAvoidDistance,
     );
-    return !this.isInsideAquarium(end, this.settings.boundsRadius);
+    if (!this.isInsideAquarium(end, this.settings.boundsRadius)) {
+      return true;
+    }
+
+    return (
+      this.obstacles.length > 0
+      && this.rayHitsObstacle(position, forward, this.settings.collisionAvoidDistance)
+    );
   }
 
-  obstacleRays(position, forward) {
-    return this.findClearObstacleDirection(position, forward).direction;
+  obstacleRays(position, forward, fish = null) {
+    const cachedDirection = fish?.collisionAvoidanceDirection;
+
+    if (
+      cachedDirection
+      && cachedDirection.dot(forward) > MIN_CACHED_CLEAR_DIRECTION_DOT
+      && this.isDirectionClear(position, cachedDirection, this.settings.collisionAvoidDistance)
+    ) {
+      return cachedDirection;
+    }
+
+    const result = this.findClearObstacleDirection(position, forward);
+    if (fish) {
+      if (!fish.collisionAvoidanceDirection) {
+        fish.collisionAvoidanceDirection = new THREE.Vector3();
+      }
+      fish.collisionAvoidanceDirection.copy(result.direction);
+      return fish.collisionAvoidanceDirection;
+    }
+
+    return result.direction;
   }
 
   createCollisionAvoidanceSnapshot(position, forward) {
@@ -295,6 +313,8 @@ export class FishSchoolSimulation {
     const forwardDirection = forward.clone().normalize();
     let selectedIndex = -1;
     let selectedDirection = null;
+    const maxDistance = this.settings.collisionAvoidDistance;
+    const hasObstacles = this.obstacles.length > 0;
     this.tmpQuat.setFromUnitVectors(this.forwardAxis, forwardDirection);
 
     for (let index = 0; index < this.rayDirections.length; index += 1) {
@@ -305,15 +325,13 @@ export class FishSchoolSimulation {
         .normalize();
       const end = this.tmpVecB.copy(position).addScaledVector(
         direction,
-        this.settings.collisionAvoidDistance,
+        maxDistance,
       );
-      const obstacleDistance = this.rayObstacleHitDistance(
-        position,
-        direction,
-        Infinity,
-      );
-      const hitsObstacle = obstacleDistance <= this.settings.collisionAvoidDistance;
       const hitsWall = !this.isInsideAquarium(end, this.settings.boundsRadius);
+      const obstacleDistance = !hasObstacles || (hitsWall && !candidateRays)
+        ? Infinity
+        : this.rayObstacleHitDistance(position, direction, maxDistance);
+      const hitsObstacle = obstacleDistance <= maxDistance;
       const isClear = !hitsObstacle && !hitsWall;
       const isSelected = isClear && selectedIndex === -1;
 
@@ -354,14 +372,29 @@ export class FishSchoolSimulation {
     return Number.isFinite(this.rayObstacleHitDistance(origin, direction, maxDistance));
   }
 
+  isDirectionClear(origin, direction, maxDistance) {
+    const end = this.tmpVecB.copy(origin).addScaledVector(direction, maxDistance);
+    return (
+      this.isInsideAquarium(end, this.settings.boundsRadius)
+      && (
+        this.obstacles.length === 0
+        || !this.rayHitsObstacle(origin, direction, maxDistance)
+      )
+    );
+  }
+
   rayObstacleHitDistance(origin, direction, maxDistance = Infinity) {
+    if (this.obstacles.length === 0) {
+      return Infinity;
+    }
+
     let nearestDistance = Infinity;
 
     for (const obstacle of this.obstacles) {
       const distance = this.raySingleObstacleHitDistance(
         origin,
         direction,
-        maxDistance,
+        Math.min(maxDistance, nearestDistance),
         obstacle,
       );
       if (distance < nearestDistance) {
@@ -430,7 +463,7 @@ export class FishSchoolSimulation {
     const discriminant = b * b - c;
 
     if (discriminant < 0) {
-      return false;
+      return Infinity;
     }
 
     const root = Math.sqrt(discriminant);
