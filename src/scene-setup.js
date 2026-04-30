@@ -121,7 +121,7 @@ function createAquariumEdges() {
     linewidth: aquariumBoxLineWidth,
     worldUnits: true,
     depthTest: true,
-    depthWrite: false,
+    depthWrite: true,
     toneMapped: false,
   });
 

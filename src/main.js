@@ -23,8 +23,8 @@ import {
   createScene,
 } from "./scene-setup.js";
 
-const STEP_FRAME_SECONDS = 1 / 60;
-const RENDER_FPS = 60;
+const RENDER_FPS = 30;
+const STEP_FRAME_SECONDS = 1 / RENDER_FPS;
 const EXPORT_WIDTH = 2048;
 const EXPORT_HEIGHT = 1152;
 const EXPORT_ASPECT_RATIO = EXPORT_WIDTH / EXPORT_HEIGHT;
