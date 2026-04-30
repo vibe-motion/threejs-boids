@@ -208,8 +208,14 @@ input[type="range"] {
   background: #3e707b;
 }
 
-.camera-panel .panel-header {
-  margin-bottom: 0;
+.camera-action-controls {
+  display: grid;
+  grid-template-columns: 1fr 92px;
+  gap: 8px;
+}
+
+.camera-action-controls button {
+  min-height: 32px;
 }
 
 .copy-status {

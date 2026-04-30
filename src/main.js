@@ -5,7 +5,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { FishSchoolSimulation } from "./fish-school-simulation.js";
-import { bindCameraToggle, createCameraRig } from "./camera-rig.js";
+import { createCameraRig } from "./camera-rig.js";
 import { aquariumHalfSize, fishConfig, obstacles, simulationSettings } from "./config.js";
 import {
   createFishMesh,
@@ -199,7 +199,6 @@ bindControls();
 bindPlaybackControls();
 bindRenderControls();
 bindDisplayModeControls();
-bindCameraToggle(cameraRig);
 bindObstacleKeyboardControls(obstacleMeshes);
 bindCameraViewControls(cameraRig);
 applyDisplayMode(DEFAULT_DISPLAY_MODE);
@@ -373,6 +372,13 @@ function bindCameraViewControls(rig) {
       const preset = cameraViewPresets[button.dataset.cameraView];
       if (!preset) return;
 
+      if (rig.isFreeCameraEnabled) {
+        rig.setFreeCameraView(preset);
+        renderCurrentFrame();
+        cameraPanel.update();
+        return;
+      }
+
       timelineStartCameraView = preset;
       timelineIntroCameraEnabled = false;
       rig.setOrbitView(preset);
@@ -480,6 +486,13 @@ function animate() {
       ? 0
       : currentRenderFrame + 1;
     setRenderFrame(nextFrame, { playing: true });
+    return;
+  }
+
+  if (cameraRig.isFreeCameraEnabled) {
+    cameraRig.update(STEP_FRAME_SECONDS);
+    renderer.render(scene, cameraRig.activeCamera);
+    cameraPanel.update();
   }
 }
 
@@ -590,9 +603,11 @@ function resetTimelineState() {
   simulation.reset(readControlValue("count"));
   syncFishMeshWithSimulation();
   aquariumEffects.update(0);
-  cameraRig.setOrbitView(timelineStartCameraView);
-  if (timelineIntroCameraEnabled) {
-    cameraRig.flyToOrbitView(introCameraView);
+  if (!cameraRig.isFreeCameraEnabled) {
+    cameraRig.setOrbitView(timelineStartCameraView);
+    if (timelineIntroCameraEnabled) {
+      cameraRig.flyToOrbitView(introCameraView);
+    }
   }
   cameraRig.updateFishCamera(simulation.fish[fishConfig.highlightedIndex], 0);
   updateObstacleRay();
@@ -1230,9 +1245,20 @@ function waitForAnimationFrames(frameCount = 1) {
 }
 
 function bindCameraPanel(rig) {
+  const freeCameraButton = getRequiredElement("#free-camera-toggle");
   const copyButton = getRequiredElement("#copy-camera-json");
   const copyStatus = getRequiredElement("#copy-camera-status");
   let copyStatusTimeout = 0;
+
+  freeCameraButton.addEventListener("click", () => {
+    rig.setFreeCameraEnabled(!rig.isFreeCameraEnabled);
+    if (rig.isFreeCameraEnabled) {
+      renderCurrentFrame();
+    } else {
+      setRenderFrame(currentRenderFrame, { playing: timelinePlaying });
+    }
+    update();
+  });
 
   copyButton.addEventListener("click", async () => {
     const json = JSON.stringify(readCameraTransformSnapshot(rig), null, 2);
@@ -1244,7 +1270,33 @@ function bindCameraPanel(rig) {
     }, 1800);
   });
 
-  return { update() {} };
+  function syncFreeCameraPan(event, panning) {
+    if (!rig.isFreeCameraEnabled || event.code !== "Space" || isEditingText(event.target)) {
+      return;
+    }
+
+    event.preventDefault();
+    rig.setFreeCameraPanning(panning);
+  }
+
+  window.addEventListener("keydown", (event) => {
+    if (!event.repeat) {
+      syncFreeCameraPan(event, true);
+    }
+  });
+  window.addEventListener("keyup", (event) => syncFreeCameraPan(event, false));
+  window.addEventListener("blur", () => rig.setFreeCameraPanning(false));
+
+  function update() {
+    freeCameraButton.textContent = rig.isFreeCameraEnabled
+      ? "Animated Camera"
+      : "Free Camera";
+    freeCameraButton.setAttribute("aria-pressed", String(rig.isFreeCameraEnabled));
+  }
+
+  update();
+
+  return { update };
 }
 
 function readCameraTransformSnapshot(rig) {
@@ -1252,8 +1304,12 @@ function readCameraTransformSnapshot(rig) {
 
   return {
     mode: rig.mode,
-    transform: {
+    camera: {
+      fov: roundCameraNumber(camera.fov),
+      near: roundCameraNumber(camera.near),
+      far: roundCameraNumber(camera.far),
       position: vectorToJSON(camera.position),
+      target: vectorToJSON(rig.orbitTarget),
       rotation: {
         x: roundCameraNumber(camera.rotation.x),
         y: roundCameraNumber(camera.rotation.y),

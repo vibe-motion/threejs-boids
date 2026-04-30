@@ -3,8 +3,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { getFishHeadPose } from "./fish-renderer.js";
 
 const CAMERA_MODE = {
-  orbit: "orbit",
-  fish: "fish",
+  animated: "animated",
+  free: "free",
 };
 
 const FISH_CAMERA_POSITION_RESPONSE = 10;
@@ -23,9 +23,18 @@ export function createCameraRig(renderer) {
 
   const controls = new OrbitControls(orbitCamera, renderer.domElement);
   controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.rotateSpeed = 0.9;
+  controls.panSpeed = 0.9;
+  controls.zoomSpeed = 0.95;
+  controls.enablePan = true;
+  controls.enabled = false;
   controls.target.set(0, 0.8, 0);
   controls.maxDistance = 38;
   controls.minDistance = 8;
+  controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+  controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+  controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
 
   const pose = {
     position: new THREE.Vector3(),
@@ -45,7 +54,7 @@ export function createCameraRig(renderer) {
     elapsed: 0,
     duration: MIN_ORBIT_VIEW_DURATION,
   };
-  let mode = CAMERA_MODE.orbit;
+  let mode = CAMERA_MODE.animated;
   let fishCameraInitialized = false;
   let orbitViewTransitionActive = false;
 
@@ -65,8 +74,16 @@ export function createCameraRig(renderer) {
     controls.update();
   }
 
-  function setOrbitMode() {
-    mode = CAMERA_MODE.orbit;
+  function setAnimatedMode() {
+    mode = CAMERA_MODE.animated;
+    controls.enabled = false;
+    controls.screenSpacePanning = false;
+    controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+  }
+
+  function setFreeMode() {
+    mode = CAMERA_MODE.free;
+    orbitViewTransitionActive = false;
     controls.enabled = true;
   }
 
@@ -103,22 +120,43 @@ export function createCameraRig(renderer) {
 
   return {
     get activeCamera() {
-      return mode === CAMERA_MODE.fish ? fishCamera : orbitCamera;
+      return orbitCamera;
+    },
+
+    get orbitTarget() {
+      return controls.target;
     },
 
     get mode() {
       return mode;
     },
 
-    toggle() {
-      orbitViewTransitionActive = false;
-      mode = mode === CAMERA_MODE.orbit ? CAMERA_MODE.fish : CAMERA_MODE.orbit;
-      controls.enabled = mode === CAMERA_MODE.orbit;
+    get isFreeCameraEnabled() {
+      return mode === CAMERA_MODE.free;
+    },
+
+    setFreeCameraEnabled(enabled) {
+      if (enabled) {
+        setFreeMode();
+      } else {
+        orbitViewTransitionActive = false;
+        setAnimatedMode();
+      }
+    },
+
+    setFreeCameraPanning(enabled) {
+      controls.screenSpacePanning = Boolean(enabled);
+      controls.mouseButtons.LEFT = enabled ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+    },
+
+    setFreeCameraView(view) {
+      setFreeMode();
+      applyOrbitView(view);
     },
 
     setOrbitView(view) {
       orbitViewTransitionActive = false;
-      setOrbitMode();
+      setAnimatedMode();
       applyOrbitView(view);
     },
 
@@ -128,7 +166,7 @@ export function createCameraRig(renderer) {
       up: viewUp = worldUp,
       speed = DEFAULT_ORBIT_VIEW_SPEED,
     }) {
-      setOrbitMode();
+      setAnimatedMode();
       orbitViewGoal.startPosition.copy(orbitCamera.position);
       orbitViewGoal.position.copy(position);
       orbitViewGoal.startTarget.copy(controls.target);
@@ -148,7 +186,7 @@ export function createCameraRig(renderer) {
     },
 
     update(dt = 0) {
-      if (mode === CAMERA_MODE.orbit) {
+      if (mode === CAMERA_MODE.animated) {
         updateOrbitViewTransition(dt);
       }
 
@@ -201,13 +239,4 @@ export function createCameraRig(renderer) {
       fishCamera.updateProjectionMatrix();
     },
   };
-}
-
-export function bindCameraToggle(cameraRig) {
-  window.addEventListener("keydown", (event) => {
-    if (event.code !== "Space" || event.repeat) return;
-
-    event.preventDefault();
-    cameraRig.toggle();
-  });
 }
