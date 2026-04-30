@@ -1,4 +1,9 @@
 import * as THREE from "three";
+import { Line2 } from "three/addons/lines/Line2.js";
+import { LineGeometry } from "three/addons/lines/LineGeometry.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { FishSchoolSimulation } from "./fish-school-simulation.js";
 import { bindCameraToggle, createCameraRig } from "./camera-rig.js";
 import { aquariumHalfSize, fishConfig, obstacles, simulationSettings } from "./config.js";
@@ -38,6 +43,8 @@ const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
 const COLLISION_DEBUG_RAY_DELAY_SECONDS = 0.04;
 const COLLISION_DEBUG_RAY_STEP_SECONDS = 0.16;
 const COLLISION_DEBUG_RAY_GROW_SECONDS = 0.13;
+const OBSTACLE_RAY_LINE_WIDTH = 4;
+const COLLISION_DEBUG_RAY_LINE_WIDTH = 3;
 const DISPLAY_MODES = {
   1: {
     aquarium: true,
@@ -743,18 +750,18 @@ function attachCollisionDebugVisualOrigin(snapshot, { exposeDebug = true, logDeb
 }
 
 function createObstacleRay() {
-  const positions = new Float32Array(6);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const geometry = new LineGeometry();
+  geometry.setPositions([0, 0, 0, 0, 0, 0]);
 
-  const material = new THREE.LineBasicMaterial({
+  const material = new LineMaterial({
     color: obstacleRayColors.clear,
+    linewidth: OBSTACLE_RAY_LINE_WIDTH,
     transparent: true,
     opacity: 0.95,
     depthTest: false,
   });
 
-  const line = new THREE.Line(geometry, material);
+  const line = new Line2(geometry, material);
   line.frustumCulled = false;
   line.renderOrder = 20;
   return line;
@@ -767,17 +774,19 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
 
   const rayPositions = new Float32Array(maxRayCount * 2 * 3);
   const rayColors = new Float32Array(maxRayCount * 2 * 3);
-  const rayGeometry = new THREE.BufferGeometry();
-  rayGeometry.setAttribute("position", new THREE.BufferAttribute(rayPositions, 3));
-  rayGeometry.setAttribute("color", new THREE.BufferAttribute(rayColors, 3));
-  rayGeometry.setDrawRange(0, 0);
-  const rayMaterial = new THREE.LineBasicMaterial({
+  const rayGeometry = new LineSegmentsGeometry();
+  rayGeometry.setPositions(rayPositions);
+  rayGeometry.setColors(rayColors);
+  rayGeometry.instanceCount = 0;
+  const rayMaterial = new LineMaterial({
     vertexColors: true,
+    linewidth: COLLISION_DEBUG_RAY_LINE_WIDTH,
     transparent: true,
     opacity: 0.96,
     depthTest: false,
+    depthWrite: false,
   });
-  const rays = new THREE.LineSegments(rayGeometry, rayMaterial);
+  const rays = new LineSegments2(rayGeometry, rayMaterial);
   rays.frustumCulled = false;
   rays.renderOrder = 31;
   group.add(rays);
@@ -823,7 +832,7 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
       rayElapsedSeconds = 0;
       loggedCandidateCount = 0;
       group.visible = false;
-      rayGeometry.setDrawRange(0, 0);
+      rayGeometry.instanceCount = 0;
       points.count = 0;
     },
     update(snapshot, dt, revealRays = true) {
@@ -894,14 +903,17 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
       }
       loggedCandidateCount = Math.max(loggedCandidateCount, visibleCount);
 
-      rayGeometry.setDrawRange(0, visibleCount * 2);
-      rayGeometry.attributes.position.needsUpdate = true;
-      rayGeometry.attributes.color.needsUpdate = true;
+      rayGeometry.instanceCount = visibleCount;
+      rayGeometry.attributes.instanceStart.data.needsUpdate = true;
+      rayGeometry.attributes.instanceColorStart.data.needsUpdate = true;
       points.count = visibleCount;
       points.instanceMatrix.needsUpdate = true;
       if (points.instanceColor) {
         points.instanceColor.needsUpdate = true;
       }
+    },
+    setResolution(width, height) {
+      rayMaterial.resolution.set(width, height);
     },
   };
 }
@@ -1032,20 +1044,14 @@ function updateObstacleRay() {
     rayDistance,
   );
 
-  const positionAttribute = obstacleRay.geometry.attributes.position;
-  positionAttribute.setXYZ(
-    0,
+  obstacleRay.geometry.setPositions([
     obstacleRayPose.position.x,
     obstacleRayPose.position.y,
     obstacleRayPose.position.z,
-  );
-  positionAttribute.setXYZ(
-    1,
     obstacleRayEnd.x,
     obstacleRayEnd.y,
     obstacleRayEnd.z,
-  );
-  positionAttribute.needsUpdate = true;
+  ]);
 
   const hitsObstacle = simulation.rayHitsObstacle(
     obstacleRayPose.position,
@@ -1080,8 +1086,14 @@ function resize() {
   renderer.setPixelRatio(pixelRatio);
   cameraRig.resize(width, height);
   renderer.setSize(width, height, false);
+  syncRayLineResolution(width, height);
   cameraPanel.update();
   renderCurrentFrame();
+}
+
+function syncRayLineResolution(width, height) {
+  obstacleRay.material.resolution.set(width, height);
+  collisionDebugOverlay.setResolution(width, height);
 }
 
 function readRenderSize() {
@@ -1365,6 +1377,7 @@ async function withFixedSizeRenderer(renderScale, task) {
   renderer.setPixelRatio(1);
   cameraRig.resize(width, height);
   renderer.setSize(width, height, false);
+  syncRayLineResolution(width, height);
 
   try {
     return await task();
