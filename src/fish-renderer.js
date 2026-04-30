@@ -7,13 +7,14 @@ const outlineScale = new THREE.Vector3(1.09, 1.09, 1.09);
 const tmpDirection = new THREE.Vector3();
 const tmpQuaternion = new THREE.Quaternion();
 const tmpMatrix = new THREE.Matrix4();
-const TOON_GRADIENT_STOPS = [52, 118, 188, 255];
 
 export function createFishMesh(count) {
   const geometry = createFishGeometry();
-  const material = new THREE.MeshToonMaterial({
+  const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    gradientMap: createToonGradientMap(),
+    roughness: 0.9,
+    metalness: 0,
+    flatShading: false,
     vertexColors: true,
   });
   const outlineMaterial = new THREE.MeshBasicMaterial({
@@ -103,7 +104,7 @@ function createFishGeometry() {
     fishConfig.radius,
     fishConfig.length,
     fishConfig.radialSegments,
-    1,
+    fishConfig.heightSegments,
   );
   const vertexColors = new Float32Array(
     geometry.attributes.position.count * 3,
@@ -111,31 +112,6 @@ function createFishGeometry() {
   geometry.setAttribute("color", new THREE.BufferAttribute(vertexColors, 3));
   geometry.computeVertexNormals();
   return geometry;
-}
-
-function createToonGradientMap() {
-  const data = new Uint8Array(TOON_GRADIENT_STOPS.length * 4);
-
-  for (let i = 0; i < TOON_GRADIENT_STOPS.length; i += 1) {
-    const offset = i * 4;
-    const value = TOON_GRADIENT_STOPS[i];
-    data[offset] = value;
-    data[offset + 1] = value;
-    data[offset + 2] = value;
-    data[offset + 3] = 255;
-  }
-
-  const texture = new THREE.DataTexture(
-    data,
-    TOON_GRADIENT_STOPS.length,
-    1,
-    THREE.RGBAFormat,
-  );
-  texture.minFilter = THREE.NearestFilter;
-  texture.magFilter = THREE.NearestFilter;
-  texture.generateMipmaps = false;
-  texture.needsUpdate = true;
-  return texture;
 }
 
 function disposeFishMaterial(material) {
