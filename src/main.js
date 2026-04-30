@@ -1264,15 +1264,24 @@ function syncRenderControls() {
 }
 
 async function exportCurrentFrame() {
-  await requestExport({
-    endpoint: "/export/frame",
-    body: {
-      frame: currentRenderFrame,
-    },
-    filename: `boids-frame-${String(currentRenderFrame).padStart(4, "0")}.png`,
-    loadingMessage: `Exporting frame ${currentRenderFrame + 1}/${renderTimelineTotalFrames}...`,
-    successMessage: "PNG exported.",
-  });
+  if (!renderControls?.exportStatus) return;
+
+  const status = renderControls.exportStatus;
+  const filename = `boids-frame-${String(currentRenderFrame).padStart(4, "0")}.png`;
+  setExportButtonsDisabled(true);
+  status.textContent = `Exporting frame ${currentRenderFrame + 1}/${renderTimelineTotalFrames}...`;
+
+  try {
+    renderCurrentFrame();
+    await waitForAnimationFrames(1);
+    const blob = await canvasToBlob(canvas, "image/png");
+    downloadBlob(blob, filename);
+    status.textContent = "PNG exported.";
+  } catch (error) {
+    status.textContent = `Export failed: ${error.message}`;
+  } finally {
+    setExportButtonsDisabled(false);
+  }
 }
 
 async function exportSequence() {
@@ -1313,7 +1322,10 @@ async function requestExport({ endpoint, body, loadingMessage, successMessage })
     downloadBlob(await response.blob(), filename);
     status.textContent = successMessage;
   } catch (error) {
-    status.textContent = `Export failed: ${error.message}`;
+    status.textContent =
+      error instanceof TypeError
+        ? `Export failed: start export server on port ${EXPORT_API_PORT} for ZIP.`
+        : `Export failed: ${error.message}`;
   } finally {
     setExportButtonsDisabled(false);
   }
@@ -1340,6 +1352,19 @@ function downloadBlob(blob, filename) {
   link.download = filename;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+}
+
+function canvasToBlob(targetCanvas, type) {
+  return new Promise((resolve, reject) => {
+    targetCanvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+
+      reject(new Error("Canvas export failed."));
+    }, type);
+  });
 }
 
 function readAttachmentFileName(disposition) {
