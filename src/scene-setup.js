@@ -5,6 +5,9 @@ import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js
 import { aquariumFloorY, aquariumSize, waterLevelY } from "./config.js";
 
 const aquariumBoxLineWidth = 0.055;
+const showAquariumEdgeMarkers = true;
+const aquariumEdgeMarkerOffset = 0.48;
+const aquariumEdgeMarkerScale = 0.68;
 const obstacleOutlineScale = new THREE.Vector3(1.035, 1.035, 1.035);
 const sceneBackgroundColor = new THREE.Color(0x5d646c);
 
@@ -74,6 +77,10 @@ export function addAquarium(scene) {
   const aquariumEdges = createAquariumEdges();
   group.add(aquariumEdges);
 
+  if (showAquariumEdgeMarkers) {
+    group.add(createAquariumEdgeMarkers());
+  }
+
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(aquariumSize.x, aquariumSize.z),
     new THREE.MeshStandardMaterial({
@@ -132,26 +139,147 @@ function createAquariumEdges() {
 }
 
 function createBoxEdgePositions(size) {
+  return createBoxEdgeSegments(size).flatMap(({ start, end }) => [
+    start.x,
+    start.y,
+    start.z,
+    end.x,
+    end.y,
+    end.z,
+  ]);
+}
+
+function createBoxEdgeSegments(size) {
   const halfX = size.x * 0.5;
   const halfY = size.y * 0.5;
   const halfZ = size.z * 0.5;
+  const point = (x, y, z) => new THREE.Vector3(x, y, z);
+  const edge = (start, end, markerDirection) => ({
+    start,
+    end,
+    markerDirection: markerDirection.normalize(),
+  });
 
   return [
-    -halfX, -halfY, -halfZ, halfX, -halfY, -halfZ,
-    halfX, -halfY, -halfZ, halfX, -halfY, halfZ,
-    halfX, -halfY, halfZ, -halfX, -halfY, halfZ,
-    -halfX, -halfY, halfZ, -halfX, -halfY, -halfZ,
+    edge(
+      point(-halfX, -halfY, -halfZ),
+      point(halfX, -halfY, -halfZ),
+      point(0, -1, -1),
+    ),
+    edge(
+      point(halfX, -halfY, -halfZ),
+      point(halfX, -halfY, halfZ),
+      point(1, -1, 0),
+    ),
+    edge(
+      point(halfX, -halfY, halfZ),
+      point(-halfX, -halfY, halfZ),
+      point(0, -1, 1),
+    ),
+    edge(
+      point(-halfX, -halfY, halfZ),
+      point(-halfX, -halfY, -halfZ),
+      point(-1, -1, 0),
+    ),
 
-    -halfX, halfY, -halfZ, halfX, halfY, -halfZ,
-    halfX, halfY, -halfZ, halfX, halfY, halfZ,
-    halfX, halfY, halfZ, -halfX, halfY, halfZ,
-    -halfX, halfY, halfZ, -halfX, halfY, -halfZ,
+    edge(
+      point(-halfX, halfY, -halfZ),
+      point(halfX, halfY, -halfZ),
+      point(0, 1, -1),
+    ),
+    edge(
+      point(halfX, halfY, -halfZ),
+      point(halfX, halfY, halfZ),
+      point(1, 1, 0),
+    ),
+    edge(
+      point(halfX, halfY, halfZ),
+      point(-halfX, halfY, halfZ),
+      point(0, 1, 1),
+    ),
+    edge(
+      point(-halfX, halfY, halfZ),
+      point(-halfX, halfY, -halfZ),
+      point(-1, 1, 0),
+    ),
 
-    -halfX, -halfY, -halfZ, -halfX, halfY, -halfZ,
-    halfX, -halfY, -halfZ, halfX, halfY, -halfZ,
-    halfX, -halfY, halfZ, halfX, halfY, halfZ,
-    -halfX, -halfY, halfZ, -halfX, halfY, halfZ,
+    edge(
+      point(-halfX, -halfY, -halfZ),
+      point(-halfX, halfY, -halfZ),
+      point(-1, 0, -1),
+    ),
+    edge(
+      point(halfX, -halfY, -halfZ),
+      point(halfX, halfY, -halfZ),
+      point(1, 0, -1),
+    ),
+    edge(
+      point(halfX, -halfY, halfZ),
+      point(halfX, halfY, halfZ),
+      point(1, 0, 1),
+    ),
+    edge(
+      point(-halfX, -halfY, halfZ),
+      point(-halfX, halfY, halfZ),
+      point(-1, 0, 1),
+    ),
   ];
+}
+
+function createAquariumEdgeMarkers() {
+  const group = new THREE.Group();
+  group.name = "AquariumEdgeMarkers";
+
+  createBoxEdgeSegments(aquariumSize).forEach((edge, index) => {
+    const marker = createAquariumEdgeMarker(String(index + 1));
+    marker.position
+      .addVectors(edge.start, edge.end)
+      .multiplyScalar(0.5)
+      .addScaledVector(edge.markerDirection, aquariumEdgeMarkerOffset);
+    marker.userData.edgeNumber = index + 1;
+    group.add(marker);
+  });
+
+  return group;
+}
+
+function createAquariumEdgeMarker(text) {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const context = canvas.getContext("2d");
+  const center = size / 2;
+  context.beginPath();
+  context.arc(center, center, 48, 0, Math.PI * 2);
+  context.fillStyle = "rgba(16, 16, 16, 0.84)";
+  context.fill();
+  context.lineWidth = 5;
+  context.strokeStyle = "rgba(255, 255, 255, 0.74)";
+  context.stroke();
+
+  context.font = `700 ${text.length > 1 ? 48 : 58}px sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = "#fff7a8";
+  context.fillText(text, center, center + 1);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.renderOrder = 20;
+  sprite.scale.set(aquariumEdgeMarkerScale, aquariumEdgeMarkerScale, 1);
+  return sprite;
 }
 
 export function addWorldAxes(scene) {

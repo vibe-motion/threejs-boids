@@ -132,6 +132,7 @@ const collisionDebugColors = {
   selected: new THREE.Color(0x3cff84),
 };
 const cameraViewTarget = new THREE.Vector3(0, 0.8, 0);
+const edgeAlignedCameraTarget = new THREE.Vector3(0, -3.0292, 0);
 const cameraViewPresets = {
   x: {
     position: new THREE.Vector3(21.3715, 1.4141, 1.4742),
@@ -147,8 +148,8 @@ const cameraViewPresets = {
     target: cameraViewTarget,
   },
   default: {
-    position: new THREE.Vector3(0, 8.5, 20),
-    target: cameraViewTarget,
+    position: new THREE.Vector3(0, 4.1329, 17.6322),
+    target: edgeAlignedCameraTarget,
   },
 };
 const INTRO_CAMERA_SPEED = 4.2;
