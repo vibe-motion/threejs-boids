@@ -6,7 +6,13 @@ import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { FishSchoolSimulation } from "./fish-school-simulation.js";
 import { createCameraRig } from "./camera-rig.js";
-import { aquariumHalfSize, fishConfig, obstacles, simulationSettings } from "./config.js";
+import {
+  aquariumHalfSize,
+  fishConfig,
+  obstacles,
+  simulationSettings,
+  waterLevelY,
+} from "./config.js";
 import {
   createFishMesh,
   disposeFishMesh,
@@ -49,9 +55,22 @@ const INTRO_BOX_START_SCALE = 0.035;
 const INTRO_BOX_OVERSHOOT_SCALE = 1.045;
 const INTRO_BOX_OVERSHOOT_PROGRESS = 0.68;
 const INTRO_FISH_DROP_SECONDS = 1;
-const INTRO_DROP_FISH_SPEED = 10.85;
+const INTRO_DROP_FISH_SPEED = 8;
 const INTRO_DROP_FISH_X_SPEED = -1.15;
 const INTRO_DROP_FISH_Z = 3;
+const INTRO_DROP_ENTRY_SPEED = 30;
+const INTRO_DROP_WATER_DRAG_STRENGTH = 7.5;
+const INTRO_DROP_START_Y = aquariumHalfSize.y - fishConfig.length * 0.55;
+const introDropDirection = new THREE.Vector3(
+  INTRO_DROP_FISH_X_SPEED,
+  -INTRO_DROP_FISH_SPEED,
+  0,
+).normalize();
+const INTRO_DROP_WATER_ENTRY_SECONDS = Math.max(
+  0,
+  (INTRO_DROP_START_Y - waterLevelY)
+    / Math.max(0.001, -introDropDirection.y * INTRO_DROP_ENTRY_SPEED),
+);
 const INTRO_DROP_COLLISION_AVOID_DISTANCE = 2.4;
 const INTRO_DROP_MAX_TURN_RATE = 6;
 const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
@@ -730,7 +749,10 @@ function stepIntroTimelineFrame(frameDt) {
     simulationTime += simulationDt;
     trace = updateIntroDropFishSimulation(
       simulationDt,
-      headingDebugger ? { traceIndex: headingDebugger.traceIndex } : undefined,
+      {
+        ...(headingDebugger ? { traceIndex: headingDebugger.traceIndex } : {}),
+        dropElapsedSeconds: simulationTime,
+      },
     );
     updateFishInstances(fishMesh, simulation.fish);
     aquariumEffects.update(simulationTime);
@@ -769,14 +791,10 @@ function ensureIntroDropFish() {
   simulation.fish.push({
     position: new THREE.Vector3(
       0,
-      aquariumHalfSize.y - fishConfig.length * 0.55,
+      INTRO_DROP_START_Y,
       INTRO_DROP_FISH_Z,
     ),
-    velocity: new THREE.Vector3(
-      INTRO_DROP_FISH_X_SPEED,
-      -INTRO_DROP_FISH_SPEED,
-      0,
-    ),
+    velocity: introDropDirection.clone().multiplyScalar(INTRO_DROP_ENTRY_SPEED),
     collisionAvoidanceDirection: null,
   });
   syncFishMeshWithSimulation();
@@ -786,7 +804,8 @@ function updateIntroDropFishSimulation(dt, options) {
   const previousMaxSpeed = simulationSettings.maxSpeed;
   const previousMaxTurnRate = simulationSettings.maxTurnRate;
   const previousCollisionAvoidDistance = simulationSettings.collisionAvoidDistance;
-  simulationSettings.maxSpeed = Math.max(previousMaxSpeed, INTRO_DROP_FISH_SPEED);
+  const dragLimitedSpeed = readIntroDropWaterDragSpeed(options?.dropElapsedSeconds ?? 0);
+  simulationSettings.maxSpeed = Math.max(previousMaxSpeed, dragLimitedSpeed);
   simulationSettings.maxTurnRate = Math.max(previousMaxTurnRate, INTRO_DROP_MAX_TURN_RATE);
   simulationSettings.collisionAvoidDistance = INTRO_DROP_COLLISION_AVOID_DISTANCE;
 
@@ -797,6 +816,23 @@ function updateIntroDropFishSimulation(dt, options) {
     simulationSettings.maxTurnRate = previousMaxTurnRate;
     simulationSettings.collisionAvoidDistance = previousCollisionAvoidDistance;
   }
+}
+
+function readIntroDropWaterDragSpeed(dropElapsedSeconds) {
+  const waterElapsedSeconds = Math.max(
+    0,
+    dropElapsedSeconds - INTRO_DROP_WATER_ENTRY_SECONDS,
+  );
+
+  if (waterElapsedSeconds <= 0) {
+    return INTRO_DROP_ENTRY_SPEED;
+  }
+
+  const dragFactor = Math.exp(
+    -INTRO_DROP_WATER_DRAG_STRENGTH * waterElapsedSeconds,
+  );
+  return INTRO_DROP_FISH_SPEED
+    + (INTRO_DROP_ENTRY_SPEED - INTRO_DROP_FISH_SPEED) * dragFactor;
 }
 
 function syncFishMeshWithSimulation() {
