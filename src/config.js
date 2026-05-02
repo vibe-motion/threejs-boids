@@ -12,7 +12,7 @@ export const fishConfig = {
   heightSegments: 3,
   highlightedIndex: 0,
   bodyColor: new THREE.Color(0xf2f6ff),
-  highlightedColor: new THREE.Color(0xfff000),
+  highlightedColor: new THREE.Color(0xf2f6ff),
 };
 
 export const simulationSettings = {

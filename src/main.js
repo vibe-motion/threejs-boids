@@ -44,10 +44,14 @@ const SHOW_OBSTACLE_RAY = false;
 const DEFAULT_LIGHT_INTENSITY = 1.3;
 const INTRO_TIMELINE_SECONDS = 8;
 const INTRO_TIMELINE_FRAMES = Math.round(INTRO_TIMELINE_SECONDS * RENDER_FPS);
-const INTRO_BOX_ENTRY_SECONDS = 0.5;
+const INTRO_BOX_ENTRY_SECONDS = 1.05;
 const INTRO_BOX_START_SCALE = 0.035;
-const INTRO_BOX_SPRING_ANGULAR_FREQUENCY = 7;
-const INTRO_BOX_SPRING_DAMPING = 0.55;
+const INTRO_BOX_OVERSHOOT_SCALE = 1.065;
+const INTRO_BOX_OVERSHOOT_PROGRESS = 0.72;
+const INTRO_FISH_DROP_SECONDS = 1.05;
+const INTRO_DROP_FISH_SPEED = 10.85;
+const INTRO_DROP_COLLISION_AVOID_DISTANCE = 2.4;
+const INTRO_DROP_MAX_TURN_RATE = 6;
 const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
 const COLLISION_DEBUG_RAY_DELAY_SECONDS = 0.04;
 const COLLISION_DEBUG_RAY_STEP_SECONDS = 0.16;
@@ -553,8 +557,7 @@ function readAdvancedRenderFrame(frameAdvance) {
 
 function stepTimelineFrame(frameDt, options = {}) {
   if (INTRO_TIMELINE_ENABLED) {
-    introTimelineTime += frameDt;
-    applyIntroTimelineState(introTimelineTime);
+    stepIntroTimelineFrame(frameDt);
     updateObstacleRay();
     cameraRig.update(frameDt);
     collisionDebugOverlay.update(null, frameDt, false);
@@ -661,7 +664,7 @@ function resetTimelineState() {
   simulationPaused = false;
   collisionDebugOverlay.reset();
   applySimulationSettingsFromControls();
-  simulation.reset(readControlValue("count"));
+  simulation.reset(INTRO_TIMELINE_ENABLED ? 0 : readControlValue("count"));
   syncFishMeshWithSimulation();
   aquariumEffects.update(0);
   if (!cameraRig.isFreeCameraEnabled) {
@@ -686,7 +689,7 @@ function applyIntroTimelineState(time) {
 
   aquariumEffects.group.scale.setScalar(readIntroBoxScale(time));
   if (fishMesh) {
-    fishMesh.visible = false;
+    fishMesh.visible = time >= INTRO_FISH_DROP_SECONDS && simulation.fish.length > 0;
   }
 }
 
@@ -699,15 +702,97 @@ function readIntroBoxScale(time) {
   }
 
   const progress = clamp01(time / INTRO_BOX_ENTRY_SECONDS);
+  if (progress < INTRO_BOX_OVERSHOOT_PROGRESS) {
+    return THREE.MathUtils.lerp(
+      INTRO_BOX_START_SCALE,
+      INTRO_BOX_OVERSHOOT_SCALE,
+      easeOutCubic(progress / INTRO_BOX_OVERSHOOT_PROGRESS),
+    );
+  }
+
   return THREE.MathUtils.lerp(
-    INTRO_BOX_START_SCALE,
+    INTRO_BOX_OVERSHOOT_SCALE,
     1,
-    easeOutSpring(
-      progress,
-      INTRO_BOX_SPRING_ANGULAR_FREQUENCY,
-      INTRO_BOX_SPRING_DAMPING,
+    easeOutCubic(
+      (progress - INTRO_BOX_OVERSHOOT_PROGRESS)
+        / (1 - INTRO_BOX_OVERSHOOT_PROGRESS),
     ),
   );
+}
+
+function stepIntroTimelineFrame(frameDt) {
+  const previousTime = introTimelineTime;
+  introTimelineTime += frameDt;
+
+  const simulationDt = advanceIntroDropFish(previousTime, introTimelineTime);
+  if (simulationDt > 0) {
+    let trace = null;
+    simulationTime += simulationDt;
+    trace = updateIntroDropFishSimulation(
+      simulationDt,
+      headingDebugger ? { traceIndex: headingDebugger.traceIndex } : undefined,
+    );
+    updateFishInstances(fishMesh, simulation.fish);
+    aquariumEffects.update(simulationTime);
+    headingDebugger?.sample({
+      dt: simulationDt,
+      fish: simulation.fish[fishConfig.highlightedIndex],
+      trace,
+    });
+    cameraRig.updateFishCamera(
+      simulation.fish[fishConfig.highlightedIndex],
+      simulationDt,
+    );
+  }
+
+  applyIntroTimelineState(introTimelineTime);
+}
+
+function advanceIntroDropFish(previousTime, nextTime) {
+  if (nextTime < INTRO_FISH_DROP_SECONDS) {
+    return 0;
+  }
+
+  ensureIntroDropFish();
+  if (previousTime < INTRO_FISH_DROP_SECONDS) {
+    return nextTime - INTRO_FISH_DROP_SECONDS;
+  }
+
+  return nextTime - previousTime;
+}
+
+function ensureIntroDropFish() {
+  if (simulation.fish.length > 0) {
+    return;
+  }
+
+  simulation.fish.push({
+    position: new THREE.Vector3(
+      0,
+      aquariumHalfSize.y - fishConfig.length * 0.55,
+      0,
+    ),
+    velocity: new THREE.Vector3(0, -INTRO_DROP_FISH_SPEED, 0),
+    collisionAvoidanceDirection: null,
+  });
+  syncFishMeshWithSimulation();
+}
+
+function updateIntroDropFishSimulation(dt, options) {
+  const previousMaxSpeed = simulationSettings.maxSpeed;
+  const previousMaxTurnRate = simulationSettings.maxTurnRate;
+  const previousCollisionAvoidDistance = simulationSettings.collisionAvoidDistance;
+  simulationSettings.maxSpeed = Math.max(previousMaxSpeed, INTRO_DROP_FISH_SPEED);
+  simulationSettings.maxTurnRate = Math.max(previousMaxTurnRate, INTRO_DROP_MAX_TURN_RATE);
+  simulationSettings.collisionAvoidDistance = INTRO_DROP_COLLISION_AVOID_DISTANCE;
+
+  try {
+    return simulation.update(dt, options);
+  } finally {
+    simulationSettings.maxSpeed = previousMaxSpeed;
+    simulationSettings.maxTurnRate = previousMaxTurnRate;
+    simulationSettings.collisionAvoidDistance = previousCollisionAvoidDistance;
+  }
 }
 
 function syncFishMeshWithSimulation() {
@@ -1187,25 +1272,6 @@ function clamp01(value) {
 
 function easeOutCubic(value) {
   return 1 - Math.pow(1 - value, 3);
-}
-
-function easeOutSpring(value, angularFrequency, damping) {
-  const clamped = clamp01(value);
-  if (clamped <= 0) {
-    return 0;
-  }
-  if (clamped >= 1) {
-    return 1;
-  }
-
-  const dampedFrequency =
-    angularFrequency * Math.sqrt(Math.max(0, 1 - damping * damping));
-  const decay = Math.exp(-damping * angularFrequency * clamped);
-  const phase =
-    Math.cos(dampedFrequency * clamped)
-    + (damping / Math.sqrt(Math.max(0.0001, 1 - damping * damping)))
-      * Math.sin(dampedFrequency * clamped);
-  return 1 - decay * phase;
 }
 
 function easeOutBack(value) {

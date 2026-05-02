@@ -48,7 +48,9 @@ export function createFishMesh(count) {
         : fishConfig.bodyColor,
     );
   }
-  mesh.instanceColor.needsUpdate = true;
+  if (mesh.instanceColor) {
+    mesh.instanceColor.needsUpdate = true;
+  }
   mesh.add(outlineMesh);
   mesh.userData.outlineMesh = outlineMesh;
 
