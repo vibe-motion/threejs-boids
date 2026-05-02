@@ -29,23 +29,17 @@ export const simulationSettings = {
   boundsRadius: 0.27,
   avoidCollisionWeight: 4,
   collisionAvoidDistance: 7,
+  sphereSeparationMargin: 4,
+  sphereSeparationWeight: 20,
   boundaryWeight: 9,
   boundaryMargin: 2.8,
 };
 
 export const obstacles = [
   {
-    shape: "plate",
-    position: new THREE.Vector3(-5.2, 0.15, 0),
-    size: new THREE.Vector3(0.36, 3.5, 4.1),
-    rotationY: -0.22,
-    bodyColor: new THREE.Color(0xd91f1f),
-    outlineColor: new THREE.Color(0x050505),
-  },
-  {
     shape: "sphere",
     position: new THREE.Vector3(3.6, -0.8, -2.35),
-    radius: 2.025,
+    radius: 1.557692,
     bodyColor: new THREE.Color(0xd91f1f),
     outlineColor: new THREE.Color(0x050505),
   },

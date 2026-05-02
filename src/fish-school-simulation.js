@@ -19,6 +19,7 @@ export class FishSchoolSimulation {
     this.tmpVecB = new THREE.Vector3();
     this.tmpVecC = new THREE.Vector3();
     this.tmpVecD = new THREE.Vector3();
+    this.tmpVecE = new THREE.Vector3();
     this.tmpQuat = new THREE.Quaternion();
     this.forwardAxis = new THREE.Vector3(0, 0, 1);
   }
@@ -90,6 +91,7 @@ export class FishSchoolSimulation {
         align: new THREE.Vector3(),
         cohesion: new THREE.Vector3(),
         separation: new THREE.Vector3(),
+        sphereSeparation: new THREE.Vector3(),
         obstacle: new THREE.Vector3(),
         boundary: new THREE.Vector3(),
       } : null;
@@ -144,6 +146,14 @@ export class FishSchoolSimulation {
           components.align.copy(align);
           components.cohesion.copy(cohesion);
           components.separation.copy(separation);
+        }
+      }
+
+      const sphereSeparation = this.sphereObstacleSeparationForce(fish.position, fish.velocity);
+      if (sphereSeparation.lengthSq() > 0) {
+        acceleration.add(sphereSeparation);
+        if (components) {
+          components.sphereSeparation.copy(sphereSeparation);
         }
       }
 
@@ -219,6 +229,55 @@ export class FishSchoolSimulation {
 
     const desired = vector.clone().normalize().multiplyScalar(this.settings.maxSpeed);
     return desired.sub(velocity).clampLength(0, this.settings.maxSteerForce);
+  }
+
+  sphereObstacleSeparationForce(position, velocity) {
+    const margin = Math.max(0, this.settings.sphereSeparationMargin ?? 0);
+    const weight = Math.max(0, this.settings.sphereSeparationWeight ?? 0);
+    if (margin <= 0 || weight <= 0 || this.obstacles.length === 0) {
+      return new THREE.Vector3();
+    }
+
+    const away = new THREE.Vector3();
+    let maxPressure = 0;
+
+    for (const obstacle of this.obstacles) {
+      if (obstacle.shape !== "sphere" || !Number.isFinite(obstacle.radius)) {
+        continue;
+      }
+
+      const radius = obstacle.radius;
+      const influenceRadius = radius + margin;
+      const offset = this.tmpVecE.subVectors(position, obstacle.position);
+      const distanceSq = offset.lengthSq();
+
+      if (distanceSq >= influenceRadius * influenceRadius) {
+        continue;
+      }
+
+      let distance = Math.sqrt(distanceSq);
+      if (distance < 0.000001) {
+        offset.copy(velocity).multiplyScalar(-1);
+        if (offset.lengthSq() < 0.000001) {
+          offset.set(1, 0, 0);
+        }
+        distance = offset.length();
+      }
+      const surfaceDistance = distance - radius;
+      const pressure =
+        surfaceDistance >= 0
+          ? 1 - surfaceDistance / margin
+          : 1 + Math.min(1, -surfaceDistance / Math.max(radius, 0.000001));
+
+      away.addScaledVector(offset, pressure / distance);
+      maxPressure = Math.max(maxPressure, pressure);
+    }
+
+    if (away.lengthSq() < 0.000001) {
+      return away;
+    }
+
+    return this.steerTowards(away, velocity).multiplyScalar(weight * maxPressure);
   }
 
   limitTurn(currentVelocity, desiredVelocity, dt) {

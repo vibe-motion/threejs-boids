@@ -1,6 +1,13 @@
 import * as THREE from "three";
 import { aquariumHalfSize, fishConfig } from "./config.js";
+import { mulberry32 } from "./random.js";
 
+const FISH_COLOR_SEED = 20260503;
+const FISH_HUE_JITTER = 0.08;
+const FISH_MIN_SATURATION = 0.62;
+const FISH_SATURATION_RANGE = 0.24;
+const FISH_MIN_LIGHTNESS = 0.5;
+const FISH_LIGHTNESS_RANGE = 0.18;
 const upAxis = new THREE.Vector3(0, 1, 0);
 const unitScale = new THREE.Vector3(1, 1, 1);
 const outlineScale = new THREE.Vector3(1.09, 1.09, 1.09);
@@ -8,6 +15,7 @@ const tmpDirection = new THREE.Vector3();
 const tmpQuaternion = new THREE.Quaternion();
 const tmpMatrix = new THREE.Matrix4();
 const tmpScale = new THREE.Vector3();
+const tmpColor = new THREE.Color();
 
 export function createFishMesh(count) {
   const geometry = createFishGeometry();
@@ -41,13 +49,9 @@ export function createFishMesh(count) {
   outlineMesh.receiveShadow = false;
   outlineMesh.renderOrder = 1;
 
+  const random = mulberry32(FISH_COLOR_SEED);
   for (let i = 0; i < count; i += 1) {
-    mesh.setColorAt(
-      i,
-      i === fishConfig.highlightedIndex
-        ? fishConfig.highlightedColor
-        : fishConfig.bodyColor,
-    );
+    mesh.setColorAt(i, createFishInstanceColor(i, random));
   }
   if (mesh.instanceColor) {
     mesh.instanceColor.needsUpdate = true;
@@ -56,6 +60,13 @@ export function createFishMesh(count) {
   mesh.userData.outlineMesh = outlineMesh;
 
   return mesh;
+}
+
+function createFishInstanceColor(index, random) {
+  const hue = (index * 0.61803398875 + (random() * 2 - 1) * FISH_HUE_JITTER) % 1;
+  const saturation = FISH_MIN_SATURATION + random() * FISH_SATURATION_RANGE;
+  const lightness = FISH_MIN_LIGHTNESS + random() * FISH_LIGHTNESS_RANGE;
+  return tmpColor.setHSL(hue < 0 ? hue + 1 : hue, saturation, lightness);
 }
 
 export function disposeFishMesh(mesh) {
