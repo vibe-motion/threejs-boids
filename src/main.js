@@ -28,6 +28,7 @@ import {
   createRenderer,
   createScene,
 } from "./scene-setup.js";
+import { mulberry32 } from "./random.js";
 
 const RENDER_FPS = 30;
 const STEP_FRAME_SECONDS = 1 / RENDER_FPS;
@@ -54,10 +55,14 @@ const INTRO_BOX_ENTRY_SECONDS = 0.5;
 const INTRO_BOX_START_SCALE = 0.035;
 const INTRO_BOX_OVERSHOOT_SCALE = 1.045;
 const INTRO_BOX_OVERSHOOT_PROGRESS = 0.68;
-const INTRO_FISH_DROP_SECONDS = 1;
+const INTRO_FIRST_FISH_DROP_GAP_SECONDS = 0.1;
+const INTRO_FIRST_FISH_DROP_SECONDS = INTRO_BOX_ENTRY_SECONDS
+  + INTRO_FIRST_FISH_DROP_GAP_SECONDS;
+const INTRO_FISH_DROP_SECONDS = 3;
+const INTRO_FISH_DROP_DISPATCH_SECONDS = 1.3;
+const INTRO_FISH_BOIDS_ENABLE_SECONDS = 4.5;
+const INTRO_DROP_FISH_COUNT = 30;
 const INTRO_DROP_FISH_SPEED = 8;
-const INTRO_DROP_FISH_X_SPEED = -1.15;
-const INTRO_DROP_FISH_Z = 3;
 const INTRO_DROP_ENTRY_SPEED = 30;
 const INTRO_DROP_WATER_DRAG_STRENGTH = 7.5;
 const INTRO_WATER_FLOW_PATH_COUNT = 5;
@@ -66,18 +71,15 @@ const INTRO_WATER_FLOW_SAMPLE_DISTANCE = 0.32;
 const INTRO_WATER_FLOW_FADE_SECONDS = 0.4;
 const INTRO_WATER_FLOW_VISIBLE_THRESHOLD = 0.035;
 const INTRO_DROP_START_Y = aquariumHalfSize.y - fishConfig.length * 0.55;
-const introDropDirection = new THREE.Vector3(
-  INTRO_DROP_FISH_X_SPEED,
-  -INTRO_DROP_FISH_SPEED,
-  0,
-).normalize();
 const INTRO_DROP_WATER_ENTRY_SECONDS = Math.max(
   0,
   (INTRO_DROP_START_Y - waterLevelY)
-    / Math.max(0.001, -introDropDirection.y * INTRO_DROP_ENTRY_SPEED),
+    / Math.max(0.001, INTRO_DROP_ENTRY_SPEED),
 );
 const INTRO_DROP_COLLISION_AVOID_DISTANCE = 2.4;
 const INTRO_DROP_MAX_TURN_RATE = 6;
+const INTRO_TIMELINE_TIME_EPSILON = 0.000001;
+const introDropFishSchedule = createIntroDropFishSchedule();
 const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
 const COLLISION_DEBUG_RAY_DELAY_SECONDS = 0.04;
 const COLLISION_DEBUG_RAY_STEP_SECONDS = 0.16;
@@ -718,7 +720,7 @@ function applyIntroTimelineState(time) {
 
   aquariumEffects.group.scale.setScalar(readIntroBoxScale(time));
   if (fishMesh) {
-    fishMesh.visible = time >= INTRO_FISH_DROP_SECONDS && simulation.fish.length > 0;
+    fishMesh.visible = time >= INTRO_FIRST_FISH_DROP_SECONDS && simulation.fish.length > 0;
   }
 }
 
@@ -760,6 +762,7 @@ function stepIntroTimelineFrame(frameDt) {
       {
         ...(headingDebugger ? { traceIndex: headingDebugger.traceIndex } : {}),
         dropElapsedSeconds: simulationTime,
+        timelineTime: previousTime,
       },
     );
     updateFishInstances(fishMesh, simulation.fish);
@@ -785,43 +788,62 @@ function stepIntroTimelineFrame(frameDt) {
 }
 
 function advanceIntroDropFish(previousTime, nextTime) {
-  if (nextTime < INTRO_FISH_DROP_SECONDS) {
+  if (nextTime < INTRO_FIRST_FISH_DROP_SECONDS) {
     return 0;
   }
 
-  ensureIntroDropFish();
-  if (previousTime < INTRO_FISH_DROP_SECONDS) {
-    return nextTime - INTRO_FISH_DROP_SECONDS;
+  spawnIntroDropFishUntil(nextTime);
+  if (previousTime < INTRO_FIRST_FISH_DROP_SECONDS) {
+    return nextTime - INTRO_FIRST_FISH_DROP_SECONDS;
   }
 
   return nextTime - previousTime;
 }
 
-function ensureIntroDropFish() {
-  if (simulation.fish.length > 0) {
+function spawnIntroDropFishUntil(time) {
+  const previousCount = simulation.fish.length;
+  while (
+    simulation.fish.length < introDropFishSchedule.length
+    && introDropFishSchedule[simulation.fish.length].time <= time
+  ) {
+    simulation.fish.push(createIntroDropFish(
+      introDropFishSchedule[simulation.fish.length],
+    ));
+  }
+
+  if (simulation.fish.length === previousCount) {
     return;
   }
 
-  simulation.fish.push({
-    position: new THREE.Vector3(
-      0,
-      INTRO_DROP_START_Y,
-      INTRO_DROP_FISH_Z,
-    ),
-    velocity: introDropDirection.clone().multiplyScalar(INTRO_DROP_ENTRY_SPEED),
-    collisionAvoidanceDirection: null,
-  });
   syncFishMeshWithSimulation();
+}
+
+function createIntroDropFish(spawn) {
+  return {
+    position: spawn.position.clone(),
+    velocity: spawn.direction.clone().multiplyScalar(spawn.speed),
+    collisionAvoidanceDirection: null,
+  };
 }
 
 function updateIntroDropFishSimulation(dt, options) {
   const previousMaxSpeed = simulationSettings.maxSpeed;
   const previousMaxTurnRate = simulationSettings.maxTurnRate;
   const previousCollisionAvoidDistance = simulationSettings.collisionAvoidDistance;
+  const previousAlignWeight = simulationSettings.alignWeight;
+  const previousCohesionWeight = simulationSettings.cohesionWeight;
+  const previousSeparateWeight = simulationSettings.separateWeight;
+  const boidsEnabled = (options?.timelineTime ?? 0)
+    >= INTRO_FISH_BOIDS_ENABLE_SECONDS - INTRO_TIMELINE_TIME_EPSILON;
   const dragLimitedSpeed = readIntroDropWaterDragSpeed(options?.dropElapsedSeconds ?? 0);
   simulationSettings.maxSpeed = Math.max(previousMaxSpeed, dragLimitedSpeed);
   simulationSettings.maxTurnRate = Math.max(previousMaxTurnRate, INTRO_DROP_MAX_TURN_RATE);
   simulationSettings.collisionAvoidDistance = INTRO_DROP_COLLISION_AVOID_DISTANCE;
+  if (!boidsEnabled) {
+    simulationSettings.alignWeight = 0;
+    simulationSettings.cohesionWeight = 0;
+    simulationSettings.separateWeight = 0;
+  }
 
   try {
     return simulation.update(dt, options);
@@ -829,7 +851,86 @@ function updateIntroDropFishSimulation(dt, options) {
     simulationSettings.maxSpeed = previousMaxSpeed;
     simulationSettings.maxTurnRate = previousMaxTurnRate;
     simulationSettings.collisionAvoidDistance = previousCollisionAvoidDistance;
+    simulationSettings.alignWeight = previousAlignWeight;
+    simulationSettings.cohesionWeight = previousCohesionWeight;
+    simulationSettings.separateWeight = previousSeparateWeight;
   }
+}
+
+function createIntroDropFishSchedule() {
+  const random = mulberry32(20260502);
+  const schedule = [
+    createIntroDropFishScheduleEntry(random, INTRO_FIRST_FISH_DROP_SECONDS, {
+      fromTop: true,
+    }),
+  ];
+  const remainingFishCount = Math.max(0, INTRO_DROP_FISH_COUNT - 1);
+  const lastBurstFishIndex = remainingFishCount - 1;
+
+  for (let i = 0; i < remainingFishCount; i += 1) {
+    const slotProgress = lastBurstFishIndex > 0 ? i / lastBurstFishIndex : 0;
+    const slotJitter = i === 0 || i === lastBurstFishIndex
+      ? 0
+      : (random() * 2 - 1) * (0.42 / Math.max(1, lastBurstFishIndex));
+    const dispatchProgress = clamp01(slotProgress + slotJitter);
+    const time = INTRO_FISH_DROP_SECONDS
+      + dispatchProgress * INTRO_FISH_DROP_DISPATCH_SECONDS;
+
+    schedule.push(createIntroDropFishScheduleEntry(random, time));
+  }
+
+  return schedule.sort((a, b) => a.time - b.time);
+}
+
+function createIntroDropFishScheduleEntry(random, time, { fromTop = false } = {}) {
+  return {
+    time,
+    position: fromTop
+      ? createIntroTopDropPosition(random)
+      : createIntroRandomDropPosition(random),
+    direction: fromTop
+      ? createIntroTopDropDirection(random)
+      : createIntroRandomDropDirection(random),
+    speed: INTRO_DROP_FISH_SPEED,
+  };
+}
+
+function createIntroTopDropPosition(random) {
+  return new THREE.Vector3(
+    THREE.MathUtils.lerp(-8.5, 8.5, random()),
+    INTRO_DROP_START_Y + THREE.MathUtils.lerp(0, 0.22, random()),
+    THREE.MathUtils.lerp(-6.2, 6.2, random()),
+  );
+}
+
+function createIntroRandomDropPosition(random) {
+  return new THREE.Vector3(
+    THREE.MathUtils.lerp(-9.4, 9.4, random()),
+    THREE.MathUtils.lerp(-5.2, 5.6, random()),
+    THREE.MathUtils.lerp(-7.2, 7.2, random()),
+  );
+}
+
+function createIntroTopDropDirection(random) {
+  return new THREE.Vector3(
+    THREE.MathUtils.lerp(-0.9, 0.9, random()),
+    THREE.MathUtils.lerp(-1, -0.72, random()),
+    THREE.MathUtils.lerp(-0.72, 0.72, random()),
+  ).normalize();
+}
+
+function createIntroRandomDropDirection(random) {
+  const direction = new THREE.Vector3();
+
+  do {
+    direction.set(
+      random() * 2 - 1,
+      random() * 2 - 1,
+      random() * 2 - 1,
+    );
+  } while (direction.lengthSq() < 0.0001);
+
+  return direction.normalize();
 }
 
 function readIntroDropWaterDragSpeed(dropElapsedSeconds) {
