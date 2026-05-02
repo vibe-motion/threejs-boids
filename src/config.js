@@ -12,7 +12,7 @@ export const fishConfig = {
   heightSegments: 3,
   highlightedIndex: 0,
   bodyColor: new THREE.Color(0xf2f6ff),
-  highlightedColor: new THREE.Color(0xf2f6ff),
+  highlightedColor: new THREE.Color(0xfff000),
 };
 
 export const simulationSettings = {
@@ -23,8 +23,8 @@ export const simulationSettings = {
   avoidanceRadius: 1.4,
   maxSteerForce: 4.2,
   alignWeight: 1.2,
-  cohesionWeight: 0.8,
-  separateWeight: 1.8,
+  cohesionWeight: 1,
+  separateWeight: 1,
   boundsRadius: 0.27,
   avoidCollisionWeight: 10,
   collisionAvoidDistance: 7,
