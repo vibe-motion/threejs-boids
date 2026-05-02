@@ -63,6 +63,7 @@ const INTRO_FISH_DROP_DISPATCH_SECONDS = 1.3;
 const INTRO_FISH_BOIDS_ENABLE_SECONDS = INTRO_FISH_DROP_SECONDS
   + INTRO_FISH_DROP_DISPATCH_SECONDS;
 const INTRO_DROP_FISH_COUNT = 30;
+const INTRO_FIRST_FISH_DROP_DIRECTION_X = -0.25;
 const INTRO_DROP_FISH_SPEED = 8;
 const INTRO_DROP_ENTRY_SPEED = 30;
 const INTRO_DROP_WATER_DRAG_STRENGTH = 7.5;
@@ -859,12 +860,16 @@ function updateIntroDropFishSimulation(dt, options) {
 }
 
 function createIntroDropFishSchedule() {
-  const random = mulberry32(20260502);
-  const schedule = [
-    createIntroDropFishScheduleEntry(random, INTRO_FIRST_FISH_DROP_SECONDS, {
-      fromTop: true,
-    }),
-  ];
+  const random = mulberry32(20260503);
+  const firstFishSpawn = createIntroDropFishScheduleEntry(
+    random,
+    INTRO_FIRST_FISH_DROP_SECONDS,
+    { fromTop: true },
+  );
+  setIntroDropDirectionX(firstFishSpawn, INTRO_FIRST_FISH_DROP_DIRECTION_X);
+  setIntroDropWaterEntryX(firstFishSpawn, 0);
+
+  const schedule = [firstFishSpawn];
   const remainingFishCount = Math.max(0, INTRO_DROP_FISH_COUNT - 1);
   const lastBurstFishIndex = remainingFishCount - 1;
 
@@ -894,6 +899,28 @@ function createIntroDropFishScheduleEntry(random, time, { fromTop = false } = {}
       : createIntroRandomDropDirection(random),
     speed: INTRO_DROP_FISH_SPEED,
   };
+}
+
+function setIntroDropWaterEntryX(spawn, targetX) {
+  const distanceToWater = (waterLevelY - spawn.position.y) / spawn.direction.y;
+  const entryX = spawn.position.x + spawn.direction.x * distanceToWater;
+  spawn.position.x += targetX - entryX;
+}
+
+function setIntroDropDirectionX(spawn, targetX) {
+  const clampedX = THREE.MathUtils.clamp(targetX, -0.98, 0.98);
+  const yzLength = Math.hypot(spawn.direction.y, spawn.direction.z);
+  if (yzLength <= 0.000001) {
+    spawn.direction.set(clampedX, -Math.sqrt(1 - clampedX * clampedX), 0);
+    return;
+  }
+
+  const yzScale = Math.sqrt(1 - clampedX * clampedX) / yzLength;
+  spawn.direction.set(
+    clampedX,
+    spawn.direction.y * yzScale,
+    spawn.direction.z * yzScale,
+  );
 }
 
 function createIntroTopDropPosition(random) {
