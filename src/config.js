@@ -45,7 +45,7 @@ export const obstacles = [
   {
     shape: "sphere",
     position: new THREE.Vector3(3.6, -0.8, -2.35),
-    radius: 1.35,
+    radius: 2.025,
     bodyColor: new THREE.Color(0xd91f1f),
     outlineColor: new THREE.Color(0x050505),
   },

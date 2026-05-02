@@ -232,6 +232,12 @@ const obstacleRayPose = {
 };
 const obstacleRayEnd = new THREE.Vector3();
 const collisionProbeDirection = new THREE.Vector3();
+const obstacleDragRaycaster = new THREE.Raycaster();
+const obstacleDragPointer = new THREE.Vector2();
+const obstacleDragPlane = new THREE.Plane();
+const obstacleDragPoint = new THREE.Vector3();
+const obstacleDragOffset = new THREE.Vector3();
+const obstacleDragCameraDirection = new THREE.Vector3();
 const collisionDebugOverlay = createCollisionAvoidanceDebugOverlay(simulation.rayDirections.length);
 
 const lighting = addLighting(scene);
@@ -249,6 +255,7 @@ bindPlaybackControls();
 bindRenderControls();
 bindDisplayModeControls();
 bindObstacleKeyboardControls(obstacleMeshes);
+bindSphereObstaclePointerControls(obstacleMeshes);
 bindCameraViewControls(cameraRig);
 applyDisplayMode(DEFAULT_DISPLAY_MODE);
 cameraRig.setOrbitView(cameraViewPresets.default);
@@ -422,6 +429,83 @@ function bindObstacleKeyboardControls(obstacleMeshes) {
   });
 }
 
+function bindSphereObstaclePointerControls(obstacleMeshes) {
+  const controlled = obstacleMeshes.find(({ obstacle }) => obstacle.shape === "sphere");
+  if (!controlled) return;
+
+  let dragState = null;
+
+  canvas.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.button !== 0 || isEditingText(event.target)) {
+        return;
+      }
+
+      updateObstacleDragRay(event);
+      const hit = obstacleDragRaycaster.intersectObject(controlled.mesh, false)[0];
+      if (!hit) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      cameraRig.activeCamera.getWorldDirection(obstacleDragCameraDirection);
+      obstacleDragPlane.setFromNormalAndCoplanarPoint(
+        obstacleDragCameraDirection,
+        controlled.obstacle.position,
+      );
+      obstacleDragRaycaster.ray.intersectPlane(obstacleDragPlane, obstacleDragPoint);
+      obstacleDragOffset.subVectors(controlled.obstacle.position, obstacleDragPoint);
+      dragState = {
+        pointerId: event.pointerId,
+      };
+      canvas.setPointerCapture(event.pointerId);
+    },
+    { capture: true },
+  );
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    updateObstacleDragRay(event);
+    if (!obstacleDragRaycaster.ray.intersectPlane(obstacleDragPlane, obstacleDragPoint)) {
+      return;
+    }
+
+    obstacleDragPoint.add(obstacleDragOffset);
+    moveSphereObstacleTo(controlled, obstacleDragPoint);
+  });
+
+  canvas.addEventListener("pointerup", (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    dragState = null;
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  });
+
+  canvas.addEventListener("pointercancel", (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return;
+    }
+
+    dragState = null;
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  });
+}
+
 function bindCameraViewControls(rig) {
   for (const button of document.querySelectorAll("[data-camera-view]")) {
     button.addEventListener("click", () => {
@@ -471,6 +555,36 @@ function moveObstacle({ obstacle, mesh }, code) {
   }
 
   mesh.position.copy(obstacle.position);
+  if (INTERACTIVE_MODE) {
+    renderCurrentFrame();
+    return;
+  }
+
+  refreshRenderTimeline({ frame: 0, playing: timelinePlaying });
+}
+
+function updateObstacleDragRay(event) {
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, rect.width);
+  const height = Math.max(1, rect.height);
+
+  obstacleDragPointer.set(
+    ((event.clientX - rect.left) / width) * 2 - 1,
+    -((event.clientY - rect.top) / height) * 2 + 1,
+  );
+  obstacleDragRaycaster.setFromCamera(obstacleDragPointer, cameraRig.activeCamera);
+}
+
+function moveSphereObstacleTo({ obstacle, mesh }, position) {
+  const radius = obstacle.radius ?? 0;
+
+  obstacle.position.set(
+    THREE.MathUtils.clamp(position.x, -aquariumHalfSize.x + radius, aquariumHalfSize.x - radius),
+    THREE.MathUtils.clamp(position.y, -aquariumHalfSize.y + radius, aquariumHalfSize.y - radius),
+    THREE.MathUtils.clamp(position.z, -aquariumHalfSize.z + radius, aquariumHalfSize.z - radius),
+  );
+  mesh.position.copy(obstacle.position);
+
   if (INTERACTIVE_MODE) {
     renderCurrentFrame();
     return;
