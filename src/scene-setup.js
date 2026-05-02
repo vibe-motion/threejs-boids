@@ -8,9 +8,11 @@ const aquariumBoxLineWidth = 0.055;
 const showAquariumEdgeMarkers = true;
 const aquariumEdgeMarkerOffset = 0.48;
 const aquariumEdgeMarkerScale = 0.68;
-const obstacleOutlineScale = new THREE.Vector3(1.035, 1.035, 1.035);
+const obstacleOutlineScale = new THREE.Vector3(1.04, 1.04, 1.04);
 const sceneBackgroundColor = new THREE.Color(0x5d646c);
 const aquariumFloorColor = 0x050505;
+const defaultObstacleBodyColor = new THREE.Color(0xffffff);
+const defaultObstacleOutlineColor = new THREE.Color(0x101010);
 
 export function createRenderer(canvas) {
   if (!canvas) {
@@ -43,11 +45,7 @@ export function createScene({ transparentBackground = false } = {}) {
 export function addLighting(scene) {
   const hemiBaseIntensity = 2.6;
   const sunBaseIntensity = 2.2;
-  const hemiLight = new THREE.HemisphereLight(
-    0x9fd8ff,
-    0x1b3024,
-    hemiBaseIntensity,
-  );
+  const hemiLight = new THREE.HemisphereLight(0x9fd8ff, 0x1b3024, hemiBaseIntensity);
   scene.add(hemiLight);
 
   const sun = new THREE.DirectionalLight(0xffffff, sunBaseIntensity);
@@ -78,9 +76,7 @@ export function addAquarium(scene) {
   const aquariumEdges = createAquariumEdges();
   group.add(aquariumEdges);
 
-  const aquariumEdgeMarkers = showAquariumEdgeMarkers
-    ? createAquariumEdgeMarkers()
-    : null;
+  const aquariumEdgeMarkers = showAquariumEdgeMarkers ? createAquariumEdgeMarkers() : null;
   if (aquariumEdgeMarkers) {
     group.add(aquariumEdgeMarkers);
   }
@@ -169,68 +165,20 @@ function createBoxEdgeSegments(size) {
   });
 
   return [
-    edge(
-      point(-halfX, -halfY, -halfZ),
-      point(halfX, -halfY, -halfZ),
-      point(0, -1, -1),
-    ),
-    edge(
-      point(halfX, -halfY, -halfZ),
-      point(halfX, -halfY, halfZ),
-      point(1, -1, 0),
-    ),
-    edge(
-      point(halfX, -halfY, halfZ),
-      point(-halfX, -halfY, halfZ),
-      point(0, -1, 1),
-    ),
-    edge(
-      point(-halfX, -halfY, halfZ),
-      point(-halfX, -halfY, -halfZ),
-      point(-1, -1, 0),
-    ),
+    edge(point(-halfX, -halfY, -halfZ), point(halfX, -halfY, -halfZ), point(0, -1, -1)),
+    edge(point(halfX, -halfY, -halfZ), point(halfX, -halfY, halfZ), point(1, -1, 0)),
+    edge(point(halfX, -halfY, halfZ), point(-halfX, -halfY, halfZ), point(0, -1, 1)),
+    edge(point(-halfX, -halfY, halfZ), point(-halfX, -halfY, -halfZ), point(-1, -1, 0)),
 
-    edge(
-      point(-halfX, halfY, -halfZ),
-      point(halfX, halfY, -halfZ),
-      point(0, 1, -1),
-    ),
-    edge(
-      point(halfX, halfY, -halfZ),
-      point(halfX, halfY, halfZ),
-      point(1, 1, 0),
-    ),
-    edge(
-      point(halfX, halfY, halfZ),
-      point(-halfX, halfY, halfZ),
-      point(0, 1, 1),
-    ),
-    edge(
-      point(-halfX, halfY, halfZ),
-      point(-halfX, halfY, -halfZ),
-      point(-1, 1, 0),
-    ),
+    edge(point(-halfX, halfY, -halfZ), point(halfX, halfY, -halfZ), point(0, 1, -1)),
+    edge(point(halfX, halfY, -halfZ), point(halfX, halfY, halfZ), point(1, 1, 0)),
+    edge(point(halfX, halfY, halfZ), point(-halfX, halfY, halfZ), point(0, 1, 1)),
+    edge(point(-halfX, halfY, halfZ), point(-halfX, halfY, -halfZ), point(-1, 1, 0)),
 
-    edge(
-      point(-halfX, -halfY, -halfZ),
-      point(-halfX, halfY, -halfZ),
-      point(-1, 0, -1),
-    ),
-    edge(
-      point(halfX, -halfY, -halfZ),
-      point(halfX, halfY, -halfZ),
-      point(1, 0, -1),
-    ),
-    edge(
-      point(halfX, -halfY, halfZ),
-      point(halfX, halfY, halfZ),
-      point(1, 0, 1),
-    ),
-    edge(
-      point(-halfX, -halfY, halfZ),
-      point(-halfX, halfY, halfZ),
-      point(-1, 0, 1),
-    ),
+    edge(point(-halfX, -halfY, -halfZ), point(-halfX, halfY, -halfZ), point(-1, 0, -1)),
+    edge(point(halfX, -halfY, -halfZ), point(halfX, halfY, -halfZ), point(1, 0, -1)),
+    edge(point(halfX, -halfY, halfZ), point(halfX, halfY, halfZ), point(1, 0, 1)),
+    edge(point(-halfX, -halfY, halfZ), point(-halfX, halfY, halfZ), point(-1, 0, 1)),
   ];
 }
 
@@ -333,19 +281,11 @@ export function addWorldAxes(scene) {
 }
 
 export function addObstacles(scene, obstacles) {
-  const obstacleMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    roughness: 0.52,
-    metalness: 0.08,
-  });
   const obstacleMeshes = [];
 
   for (const obstacle of obstacles) {
     const geometry = createObstacleGeometry(obstacle);
-    const mesh = new THREE.Mesh(
-      geometry,
-      createObstacleMaterial(obstacle, obstacleMaterial),
-    );
+    const mesh = new THREE.Mesh(geometry, createObstacleMaterial(obstacle));
     mesh.position.copy(obstacle.position);
     if (obstacle.rotationY) {
       mesh.rotation.y = obstacle.rotationY;
@@ -354,11 +294,9 @@ export function addObstacles(scene, obstacles) {
     mesh.receiveShadow = true;
     mesh.renderOrder = 2;
 
-    if (obstacle.shape === "plate") {
-      const outlineMesh = createObstacleOutline(geometry);
-      mesh.add(outlineMesh);
-      mesh.userData.outlineMesh = outlineMesh;
-    }
+    const outlineMesh = createObstacleOutline(geometry, obstacle);
+    mesh.add(outlineMesh);
+    mesh.userData.outlineMesh = outlineMesh;
 
     scene.add(mesh);
     obstacleMeshes.push({ obstacle, mesh });
@@ -367,9 +305,9 @@ export function addObstacles(scene, obstacles) {
   return obstacleMeshes;
 }
 
-function createObstacleOutline(geometry) {
+function createObstacleOutline(geometry, obstacle) {
   const outlineMaterial = new THREE.MeshBasicMaterial({
-    color: 0x101010,
+    color: obstacle.outlineColor ?? defaultObstacleOutlineColor,
     side: THREE.BackSide,
     depthTest: true,
     depthWrite: false,
@@ -383,49 +321,27 @@ function createObstacleOutline(geometry) {
   return outlineMesh;
 }
 
-function createObstacleMaterial(obstacle, fallbackMaterial) {
+function createObstacleMaterial(obstacle) {
   if (obstacle.shape !== "plate") {
-    return fallbackMaterial;
+    return new THREE.MeshStandardMaterial({
+      color: obstacle.bodyColor ?? defaultObstacleBodyColor,
+      roughness: 0.52,
+      metalness: 0.08,
+    });
   }
 
   const faceMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    map: createPlateCenterTexture(),
+    color: obstacle.bodyColor ?? defaultObstacleBodyColor,
     roughness: 0.52,
     metalness: 0.08,
   });
   const edgeMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
+    color: obstacle.bodyColor ?? defaultObstacleBodyColor,
     roughness: 0.52,
     metalness: 0.08,
   });
 
-  return [
-    faceMaterial,
-    faceMaterial,
-    edgeMaterial,
-    edgeMaterial,
-    edgeMaterial,
-    edgeMaterial,
-  ];
-}
-
-function createPlateCenterTexture() {
-  const size = 512;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-
-  const context = canvas.getContext("2d");
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, size, size);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.needsUpdate = true;
-  return texture;
+  return [faceMaterial, faceMaterial, edgeMaterial, edgeMaterial, edgeMaterial, edgeMaterial];
 }
 
 function createObstacleGeometry(obstacle) {

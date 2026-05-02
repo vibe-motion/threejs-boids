@@ -49,6 +49,8 @@ const EXPORT_SETTLE_FRAMES = 2;
 const AUTO_PAUSE_ON_FIRST_COLLISION_AVOIDANCE = false;
 const SHOW_OBSTACLE_RAY = false;
 const DEFAULT_LIGHT_INTENSITY = 1.3;
+const INTERACTIVE_MODE = true;
+const INTERACTIVE_MAX_DELTA_SECONDS = 1 / 20;
 const INTRO_TIMELINE_SECONDS = 9;
 const INTRO_TIMELINE_FRAMES = Math.round(INTRO_TIMELINE_SECONDS * RENDER_FPS);
 const INTRO_BOX_ENTRY_SECONDS = 0.5;
@@ -56,12 +58,10 @@ const INTRO_BOX_START_SCALE = 0.035;
 const INTRO_BOX_OVERSHOOT_SCALE = 1.045;
 const INTRO_BOX_OVERSHOOT_PROGRESS = 0.68;
 const INTRO_FIRST_FISH_DROP_GAP_SECONDS = 0.1;
-const INTRO_FIRST_FISH_DROP_SECONDS = INTRO_BOX_ENTRY_SECONDS
-  + INTRO_FIRST_FISH_DROP_GAP_SECONDS;
+const INTRO_FIRST_FISH_DROP_SECONDS = INTRO_BOX_ENTRY_SECONDS + INTRO_FIRST_FISH_DROP_GAP_SECONDS;
 const INTRO_FISH_DROP_SECONDS = 3;
 const INTRO_FISH_DROP_DISPATCH_SECONDS = 1.3;
-const INTRO_FISH_BOIDS_ENABLE_SECONDS = INTRO_FISH_DROP_SECONDS
-  + INTRO_FISH_DROP_DISPATCH_SECONDS;
+const INTRO_FISH_BOIDS_ENABLE_SECONDS = INTRO_FISH_DROP_SECONDS + INTRO_FISH_DROP_DISPATCH_SECONDS;
 const INTRO_DROP_FISH_COUNT = 30;
 const INTRO_FIRST_FISH_DROP_DIRECTION_X = -0.25;
 const INTRO_DROP_FISH_SPEED = 8;
@@ -75,8 +75,7 @@ const INTRO_WATER_FLOW_VISIBLE_THRESHOLD = 0.035;
 const INTRO_DROP_START_Y = aquariumHalfSize.y - fishConfig.length * 0.55;
 const INTRO_DROP_WATER_ENTRY_SECONDS = Math.max(
   0,
-  (INTRO_DROP_START_Y - waterLevelY)
-    / Math.max(0.001, INTRO_DROP_ENTRY_SPEED),
+  (INTRO_DROP_START_Y - waterLevelY) / Math.max(0.001, INTRO_DROP_ENTRY_SPEED),
 );
 const INTRO_DROP_COLLISION_AVOID_DISTANCE = 2.4;
 const INTRO_DROP_MAX_TURN_RATE = 6;
@@ -213,6 +212,7 @@ let renderControls = null;
 let currentRenderFrame = 0;
 let renderTimelineTotalFrames = 1;
 let timelinePlaying = true;
+let interactivePlaybackTimestamp = null;
 let previewPlaybackTimestamp = null;
 let previewPlaybackAccumulator = 0;
 let applyingAbsoluteFrame = false;
@@ -232,9 +232,7 @@ const obstacleRayPose = {
 };
 const obstacleRayEnd = new THREE.Vector3();
 const collisionProbeDirection = new THREE.Vector3();
-const collisionDebugOverlay = createCollisionAvoidanceDebugOverlay(
-  simulation.rayDirections.length,
-);
+const collisionDebugOverlay = createCollisionAvoidanceDebugOverlay(simulation.rayDirections.length);
 
 const lighting = addLighting(scene);
 lighting.setIntensity(DEFAULT_LIGHT_INTENSITY);
@@ -254,6 +252,9 @@ bindObstacleKeyboardControls(obstacleMeshes);
 bindCameraViewControls(cameraRig);
 applyDisplayMode(DEFAULT_DISPLAY_MODE);
 cameraRig.setOrbitView(cameraViewPresets.default);
+if (INTERACTIVE_MODE) {
+  cameraRig.setFreeCameraEnabled(true);
+}
 const cameraPanel = bindCameraPanel(cameraRig);
 simulation.reset(readControlValue("count"));
 rebuildFishMesh();
@@ -295,6 +296,12 @@ function bindPlaybackControls() {
 
   stepButton.addEventListener("click", () => {
     if (timelinePlaying) return;
+
+    if (INTERACTIVE_MODE) {
+      stepInteractiveSimulation(STEP_FRAME_SECONDS);
+      renderInteractiveScene(STEP_FRAME_SECONDS);
+      return;
+    }
 
     setRenderFrame(currentRenderFrame + 1, { playing: false });
   });
@@ -402,9 +409,7 @@ function applyWorldAxesVisibility(visible) {
 }
 
 function bindObstacleKeyboardControls(obstacleMeshes) {
-  const controlled = obstacleMeshes.find(
-    ({ obstacle }) => obstacle.shape === "plate",
-  );
+  const controlled = obstacleMeshes.find(({ obstacle }) => obstacle.shape === "plate");
   if (!controlled) return;
 
   window.addEventListener("keydown", (event) => {
@@ -425,6 +430,13 @@ function bindCameraViewControls(rig) {
 
       if (rig.isFreeCameraEnabled) {
         rig.setFreeCameraView(preset);
+        renderCurrentFrame();
+        cameraPanel.update();
+        return;
+      }
+
+      if (INTERACTIVE_MODE) {
+        rig.setOrbitView(preset);
         renderCurrentFrame();
         cameraPanel.update();
         return;
@@ -459,6 +471,11 @@ function moveObstacle({ obstacle, mesh }, code) {
   }
 
   mesh.position.copy(obstacle.position);
+  if (INTERACTIVE_MODE) {
+    renderCurrentFrame();
+    return;
+  }
+
   refreshRenderTimeline({ frame: 0, playing: timelinePlaying });
 }
 
@@ -501,6 +518,10 @@ function applyControlChange(key) {
   }
 
   applySimulationSettingsFromControls();
+  if (INTERACTIVE_MODE) {
+    return;
+  }
+
   refreshRenderTimeline({ frame: 0, playing: timelinePlaying });
 }
 
@@ -516,6 +537,11 @@ function setFishCount(count) {
   collisionAvoidanceSnapshot = null;
   collisionDebugOverlay.reset();
   rebuildFishMesh();
+  if (INTERACTIVE_MODE) {
+    renderCurrentFrame();
+    return;
+  }
+
   refreshRenderTimeline({ frame: 0, playing: timelinePlaying });
 }
 
@@ -532,6 +558,11 @@ function rebuildFishMesh() {
 }
 
 function animate(timestamp = 0) {
+  if (INTERACTIVE_MODE) {
+    advanceInteractivePlayback(timestamp);
+    return;
+  }
+
   if (timelinePlaying) {
     advancePreviewPlayback(timestamp);
     return;
@@ -545,10 +576,51 @@ function animate(timestamp = 0) {
   }
 }
 
+function advanceInteractivePlayback(timestamp) {
+  const timestampSeconds = Number.isFinite(timestamp) ? timestamp / 1000 : null;
+  const dt =
+    timestampSeconds !== null && interactivePlaybackTimestamp !== null
+      ? Math.min(
+          Math.max(0, timestampSeconds - interactivePlaybackTimestamp),
+          INTERACTIVE_MAX_DELTA_SECONDS,
+        )
+      : 0;
+
+  interactivePlaybackTimestamp = timestampSeconds;
+
+  if (timelinePlaying && dt > 0) {
+    stepInteractiveSimulation(dt);
+  }
+
+  renderInteractiveScene(dt);
+}
+
+function stepInteractiveSimulation(dt) {
+  simulationTime += dt;
+  const trace = simulation.update(
+    dt,
+    headingDebugger ? { traceIndex: headingDebugger.traceIndex } : undefined,
+  );
+  updateFishInstances(fishMesh, simulation.fish);
+  aquariumEffects.update(simulationTime);
+  headingDebugger?.sample({
+    dt,
+    fish: simulation.fish[fishConfig.highlightedIndex],
+    trace,
+  });
+  cameraRig.updateFishCamera(simulation.fish[fishConfig.highlightedIndex], dt);
+}
+
+function renderInteractiveScene(dt = 0) {
+  updateObstacleRay();
+  cameraRig.update(dt);
+  collisionDebugOverlay.update(null, dt, false);
+  cameraPanel.update();
+  renderer.render(scene, cameraRig.activeCamera);
+}
+
 function advancePreviewPlayback(timestamp) {
-  const timestampSeconds = Number.isFinite(timestamp)
-    ? timestamp / 1000
-    : null;
+  const timestampSeconds = Number.isFinite(timestamp) ? timestamp / 1000 : null;
 
   if (timestampSeconds === null || previewPlaybackTimestamp === null) {
     previewPlaybackTimestamp = timestampSeconds;
@@ -615,10 +687,7 @@ function stepTimelineFrame(frameDt, options = {}) {
       fish: simulation.fish[fishConfig.highlightedIndex],
       trace,
     });
-    cameraRig.updateFishCamera(
-      simulation.fish[fishConfig.highlightedIndex],
-      simulationDt,
-    );
+    cameraRig.updateFishCamera(simulation.fish[fishConfig.highlightedIndex], simulationDt);
     updatePostAvoidanceSwimTimer(simulationDt);
   }
 
@@ -626,16 +695,17 @@ function stepTimelineFrame(frameDt, options = {}) {
   cameraRig.update(frameDt);
   const collisionDebugSnapshot = simulationPaused ? collisionAvoidanceSnapshot : null;
   const revealCollisionDebugRays = shouldRevealCollisionDebugRays(frameDt);
-  collisionDebugOverlay.update(
-    collisionDebugSnapshot,
-    frameDt,
-    revealCollisionDebugRays,
-  );
+  collisionDebugOverlay.update(collisionDebugSnapshot, frameDt, revealCollisionDebugRays);
   updateCollisionDebugResume(revealCollisionDebugRays, frameDt);
   cameraPanel.update();
 }
 
 function renderCurrentFrame() {
+  if (INTERACTIVE_MODE) {
+    renderInteractiveScene(0);
+    return;
+  }
+
   renderAbsoluteFrame(currentRenderFrame);
 }
 
@@ -653,11 +723,10 @@ function setRenderFrame(frame, { playing = timelinePlaying } = {}) {
   syncRenderControls();
 }
 
-function renderAbsoluteFrame(frame, {
-  exposeDebug = !renderOptions.isExportMode,
-  logDebug = false,
-  render = true,
-} = {}) {
+function renderAbsoluteFrame(
+  frame,
+  { exposeDebug = !renderOptions.isExportMode, logDebug = false, render = true } = {},
+) {
   const clampedFrame = clampFrame(frame, renderTimelineTotalFrames);
   const previousLoggingEnabled = collisionDebugLoggingEnabled;
   applyingAbsoluteFrame = true;
@@ -746,8 +815,7 @@ function readIntroBoxScale(time) {
   return THREE.MathUtils.lerp(
     INTRO_BOX_OVERSHOOT_SCALE,
     1,
-    (progress - INTRO_BOX_OVERSHOOT_PROGRESS)
-      / (1 - INTRO_BOX_OVERSHOOT_PROGRESS),
+    (progress - INTRO_BOX_OVERSHOOT_PROGRESS) / (1 - INTRO_BOX_OVERSHOOT_PROGRESS),
   );
 }
 
@@ -759,14 +827,11 @@ function stepIntroTimelineFrame(frameDt) {
   if (simulationDt > 0) {
     let trace = null;
     simulationTime += simulationDt;
-    trace = updateIntroDropFishSimulation(
-      simulationDt,
-      {
-        ...(headingDebugger ? { traceIndex: headingDebugger.traceIndex } : {}),
-        dropElapsedSeconds: simulationTime,
-        timelineTime: previousTime,
-      },
-    );
+    trace = updateIntroDropFishSimulation(simulationDt, {
+      ...(headingDebugger ? { traceIndex: headingDebugger.traceIndex } : {}),
+      dropElapsedSeconds: simulationTime,
+      timelineTime: previousTime,
+    });
     updateFishInstances(fishMesh, simulation.fish);
     aquariumEffects.update(simulationTime);
     headingDebugger?.sample({
@@ -774,14 +839,8 @@ function stepIntroTimelineFrame(frameDt) {
       fish: simulation.fish[fishConfig.highlightedIndex],
       trace,
     });
-    cameraRig.updateFishCamera(
-      simulation.fish[fishConfig.highlightedIndex],
-      simulationDt,
-    );
-    introWaterFlowEffect.update(
-      simulation.fish[fishConfig.highlightedIndex],
-      simulationTime,
-    );
+    cameraRig.updateFishCamera(simulation.fish[fishConfig.highlightedIndex], simulationDt);
+    introWaterFlowEffect.update(simulation.fish[fishConfig.highlightedIndex], simulationTime);
   } else {
     introWaterFlowEffect.reset();
   }
@@ -805,12 +864,10 @@ function advanceIntroDropFish(previousTime, nextTime) {
 function spawnIntroDropFishUntil(time) {
   const previousCount = simulation.fish.length;
   while (
-    simulation.fish.length < introDropFishSchedule.length
-    && introDropFishSchedule[simulation.fish.length].time <= time
+    simulation.fish.length < introDropFishSchedule.length &&
+    introDropFishSchedule[simulation.fish.length].time <= time
   ) {
-    simulation.fish.push(createIntroDropFish(
-      introDropFishSchedule[simulation.fish.length],
-    ));
+    simulation.fish.push(createIntroDropFish(introDropFishSchedule[simulation.fish.length]));
   }
 
   if (simulation.fish.length === previousCount) {
@@ -835,8 +892,8 @@ function updateIntroDropFishSimulation(dt, options) {
   const previousAlignWeight = simulationSettings.alignWeight;
   const previousCohesionWeight = simulationSettings.cohesionWeight;
   const previousSeparateWeight = simulationSettings.separateWeight;
-  const boidsEnabled = (options?.timelineTime ?? 0)
-    >= INTRO_FISH_BOIDS_ENABLE_SECONDS - INTRO_TIMELINE_TIME_EPSILON;
+  const boidsEnabled =
+    (options?.timelineTime ?? 0) >= INTRO_FISH_BOIDS_ENABLE_SECONDS - INTRO_TIMELINE_TIME_EPSILON;
   const dragLimitedSpeed = readIntroDropWaterDragSpeed(options?.dropElapsedSeconds ?? 0);
   simulationSettings.maxSpeed = Math.max(previousMaxSpeed, dragLimitedSpeed);
   simulationSettings.maxTurnRate = Math.max(previousMaxTurnRate, INTRO_DROP_MAX_TURN_RATE);
@@ -861,11 +918,9 @@ function updateIntroDropFishSimulation(dt, options) {
 
 function createIntroDropFishSchedule() {
   const random = mulberry32(20260503);
-  const firstFishSpawn = createIntroDropFishScheduleEntry(
-    random,
-    INTRO_FIRST_FISH_DROP_SECONDS,
-    { fromTop: true },
-  );
+  const firstFishSpawn = createIntroDropFishScheduleEntry(random, INTRO_FIRST_FISH_DROP_SECONDS, {
+    fromTop: true,
+  });
   setIntroDropDirectionX(firstFishSpawn, INTRO_FIRST_FISH_DROP_DIRECTION_X);
   setIntroDropWaterEntryX(firstFishSpawn, 0);
 
@@ -875,12 +930,12 @@ function createIntroDropFishSchedule() {
 
   for (let i = 0; i < remainingFishCount; i += 1) {
     const slotProgress = lastBurstFishIndex > 0 ? i / lastBurstFishIndex : 0;
-    const slotJitter = i === 0 || i === lastBurstFishIndex
-      ? 0
-      : (random() * 2 - 1) * (0.42 / Math.max(1, lastBurstFishIndex));
+    const slotJitter =
+      i === 0 || i === lastBurstFishIndex
+        ? 0
+        : (random() * 2 - 1) * (0.42 / Math.max(1, lastBurstFishIndex));
     const dispatchProgress = clamp01(slotProgress + slotJitter);
-    const time = INTRO_FISH_DROP_SECONDS
-      + dispatchProgress * INTRO_FISH_DROP_DISPATCH_SECONDS;
+    const time = INTRO_FISH_DROP_SECONDS + dispatchProgress * INTRO_FISH_DROP_DISPATCH_SECONDS;
 
     schedule.push(createIntroDropFishScheduleEntry(random, time));
   }
@@ -891,9 +946,7 @@ function createIntroDropFishSchedule() {
 function createIntroDropFishScheduleEntry(random, time, { fromTop = false } = {}) {
   return {
     time,
-    position: fromTop
-      ? createIntroTopDropPosition(random)
-      : createIntroRandomDropPosition(random),
+    position: fromTop ? createIntroTopDropPosition(random) : createIntroRandomDropPosition(random),
     direction: fromTop
       ? createIntroTopDropDirection(random)
       : createIntroRandomDropDirection(random),
@@ -916,11 +969,7 @@ function setIntroDropDirectionX(spawn, targetX) {
   }
 
   const yzScale = Math.sqrt(1 - clampedX * clampedX) / yzLength;
-  spawn.direction.set(
-    clampedX,
-    spawn.direction.y * yzScale,
-    spawn.direction.z * yzScale,
-  );
+  spawn.direction.set(clampedX, spawn.direction.y * yzScale, spawn.direction.z * yzScale);
 }
 
 function createIntroTopDropPosition(random) {
@@ -951,31 +1000,21 @@ function createIntroRandomDropDirection(random) {
   const direction = new THREE.Vector3();
 
   do {
-    direction.set(
-      random() * 2 - 1,
-      random() * 2 - 1,
-      random() * 2 - 1,
-    );
+    direction.set(random() * 2 - 1, random() * 2 - 1, random() * 2 - 1);
   } while (direction.lengthSq() < 0.0001);
 
   return direction.normalize();
 }
 
 function readIntroDropWaterDragSpeed(dropElapsedSeconds) {
-  const waterElapsedSeconds = Math.max(
-    0,
-    dropElapsedSeconds - INTRO_DROP_WATER_ENTRY_SECONDS,
-  );
+  const waterElapsedSeconds = Math.max(0, dropElapsedSeconds - INTRO_DROP_WATER_ENTRY_SECONDS);
 
   if (waterElapsedSeconds <= 0) {
     return INTRO_DROP_ENTRY_SPEED;
   }
 
-  const dragFactor = Math.exp(
-    -INTRO_DROP_WATER_DRAG_STRENGTH * waterElapsedSeconds,
-  );
-  return INTRO_DROP_FISH_SPEED
-    + (INTRO_DROP_ENTRY_SPEED - INTRO_DROP_FISH_SPEED) * dragFactor;
+  const dragFactor = Math.exp(-INTRO_DROP_WATER_DRAG_STRENGTH * waterElapsedSeconds);
+  return INTRO_DROP_FISH_SPEED + (INTRO_DROP_ENTRY_SPEED - INTRO_DROP_FISH_SPEED) * dragFactor;
 }
 
 function syncFishMeshWithSimulation() {
@@ -988,6 +1027,16 @@ function syncFishMeshWithSimulation() {
 }
 
 function refreshRenderTimeline({ frame = currentRenderFrame, playing = timelinePlaying } = {}) {
+  if (INTERACTIVE_MODE) {
+    renderTimelineTotalFrames = 1;
+    currentRenderFrame = 0;
+    timelinePlaying = Boolean(playing);
+    renderCurrentFrame();
+    syncPlaybackControls();
+    syncRenderControls();
+    return;
+  }
+
   renderTimelineTotalFrames = computeRenderTimelineTotalFrames();
   currentRenderFrame = clampFrame(frame, renderTimelineTotalFrames);
   timelinePlaying = Boolean(playing);
@@ -1026,9 +1075,8 @@ function computeRenderTimelineTotalFrames() {
 }
 
 function readSelectedCollisionCandidateIndex(snapshot) {
-  const selectedIndex = snapshot.visualSelectedIndex >= 0
-    ? snapshot.visualSelectedIndex
-    : snapshot.selectedIndex;
+  const selectedIndex =
+    snapshot.visualSelectedIndex >= 0 ? snapshot.visualSelectedIndex : snapshot.selectedIndex;
   return Math.max(0, selectedIndex);
 }
 
@@ -1057,10 +1105,7 @@ function maybePauseForFirstCollisionAvoidance(options = {}) {
   }
 
   collisionAvoidanceSnapshot = attachCollisionDebugVisualOrigin(
-    simulation.createCollisionAvoidanceSnapshot(
-      fish.position,
-      collisionProbeDirection,
-    ),
+    simulation.createCollisionAvoidanceSnapshot(fish.position, collisionProbeDirection),
     options,
   );
   didAutoPauseForCollisionAvoidance = true;
@@ -1102,8 +1147,7 @@ function updateCollisionDebugResume(revealRays, dt) {
 
   collisionDebugRevealElapsedSeconds += dt;
   const resumeAfterSeconds =
-    readSelectedCollisionDebugRevealSeconds(collisionAvoidanceSnapshot)
-    + TIMELINE_GAP_SECONDS;
+    readSelectedCollisionDebugRevealSeconds(collisionAvoidanceSnapshot) + TIMELINE_GAP_SECONDS;
 
   if (collisionDebugRevealElapsedSeconds < resumeAfterSeconds) {
     return;
@@ -1129,11 +1173,13 @@ function updatePostAvoidanceSwimTimer(dt) {
 function readSelectedCollisionDebugRevealSeconds(snapshot) {
   const selectedIndex = readSelectedCollisionCandidateIndex(snapshot);
   const pointRevealSeconds =
-    COLLISION_DEBUG_RAY_GROW_SECONDS * COLLISION_DEBUG_POINT_RAY_PROGRESS
-    + COLLISION_DEBUG_POINT_GROW_SECONDS;
-  return selectedIndex * COLLISION_DEBUG_RAY_STEP_SECONDS
-    + COLLISION_DEBUG_RAY_DELAY_SECONDS
-    + Math.max(COLLISION_DEBUG_RAY_GROW_SECONDS, pointRevealSeconds);
+    COLLISION_DEBUG_RAY_GROW_SECONDS * COLLISION_DEBUG_POINT_RAY_PROGRESS +
+    COLLISION_DEBUG_POINT_GROW_SECONDS;
+  return (
+    selectedIndex * COLLISION_DEBUG_RAY_STEP_SECONDS +
+    COLLISION_DEBUG_RAY_DELAY_SECONDS +
+    Math.max(COLLISION_DEBUG_RAY_GROW_SECONDS, pointRevealSeconds)
+  );
 }
 
 function attachCollisionDebugVisualOrigin(snapshot, { exposeDebug = true, logDebug = true } = {}) {
@@ -1148,22 +1194,18 @@ function attachCollisionDebugVisualOrigin(snapshot, { exposeDebug = true, logDeb
       candidate.direction,
       Infinity,
     );
-    const visualEnd = snapshot.visualOrigin.clone().addScaledVector(
-      candidate.direction,
-      snapshot.maxDistance,
-    );
+    const visualEnd = snapshot.visualOrigin
+      .clone()
+      .addScaledVector(candidate.direction, snapshot.maxDistance);
 
-    candidate.visualObstacleDistance = Number.isFinite(obstacleDistance)
-      ? obstacleDistance
-      : null;
+    candidate.visualObstacleDistance = Number.isFinite(obstacleDistance) ? obstacleDistance : null;
     candidate.visualHitsObstacle = obstacleDistance <= snapshot.maxDistance;
     candidate.visualHitsWall = !simulation.isInsideAquarium(
       visualEnd,
       simulationSettings.boundsRadius,
     );
     candidate.visualIsClear = !candidate.visualHitsObstacle && !candidate.visualHitsWall;
-    candidate.visualIsSelected =
-      candidate.visualIsClear && snapshot.visualSelectedIndex === -1;
+    candidate.visualIsSelected = candidate.visualIsClear && snapshot.visualSelectedIndex === -1;
 
     if (candidate.visualIsSelected) {
       snapshot.visualSelectedIndex = candidate.index;
@@ -1251,9 +1293,9 @@ function createIntroWaterFlowEffect() {
   function addPathSample(fish, dropElapsedSeconds, strength) {
     const previousSample = samples[samples.length - 1];
     if (
-      previousSample
-      && previousSample.position.distanceToSquared(fish.position)
-        < INTRO_WATER_FLOW_SAMPLE_DISTANCE * INTRO_WATER_FLOW_SAMPLE_DISTANCE
+      previousSample &&
+      previousSample.position.distanceToSquared(fish.position) <
+        INTRO_WATER_FLOW_SAMPLE_DISTANCE * INTRO_WATER_FLOW_SAMPLE_DISTANCE
     ) {
       previousSample.strength = Math.max(previousSample.strength, strength);
       previousSample.time = dropElapsedSeconds;
@@ -1341,11 +1383,10 @@ function createIntroWaterFlowEffect() {
         for (let p = 0; p < INTRO_WATER_FLOW_PATH_POINTS; p += 1) {
           const sampleIndex = Math.max(0, newestIndex - p);
           const sample = samples[sampleIndex] ?? samples[0];
-          const wave = Math.sin(sample.time * 28 + i * 1.7)
-            * 0.018
-            * sample.alpha;
+          const wave = Math.sin(sample.time * 28 + i * 1.7) * 0.018 * sample.alpha;
 
-          point.copy(sample.position)
+          point
+            .copy(sample.position)
             .addScaledVector(sample.right, lateralOffset + wave)
             .addScaledVector(sample.up, depthOffset - wave * 0.5);
 
@@ -1394,18 +1435,9 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
     depthTest: false,
   });
   const pointGeometry = new THREE.SphereGeometry(0.075, 12, 8);
-  const pointVertexColors = new Float32Array(
-    pointGeometry.attributes.position.count * 3,
-  ).fill(1);
-  pointGeometry.setAttribute(
-    "color",
-    new THREE.BufferAttribute(pointVertexColors, 3),
-  );
-  const points = new THREE.InstancedMesh(
-    pointGeometry,
-    pointMaterial,
-    maxRayCount,
-  );
+  const pointVertexColors = new Float32Array(pointGeometry.attributes.position.count * 3).fill(1);
+  pointGeometry.setAttribute("color", new THREE.BufferAttribute(pointVertexColors, 3));
+  const points = new THREE.InstancedMesh(pointGeometry, pointMaterial, maxRayCount);
   for (let i = 0; i < maxRayCount; i += 1) {
     points.setColorAt(i, collisionDebugColors.point);
   }
@@ -1468,21 +1500,20 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
 
         const rayProgress = easeOutCubic(
           clamp01(
-            (candidateElapsed - COLLISION_DEBUG_RAY_DELAY_SECONDS)
-              / COLLISION_DEBUG_RAY_GROW_SECONDS,
+            (candidateElapsed - COLLISION_DEBUG_RAY_DELAY_SECONDS) /
+              COLLISION_DEBUG_RAY_GROW_SECONDS,
           ),
         );
-        const pointElapsed = candidateElapsed
-          - COLLISION_DEBUG_RAY_DELAY_SECONDS
-          - COLLISION_DEBUG_RAY_GROW_SECONDS * COLLISION_DEBUG_POINT_RAY_PROGRESS;
+        const pointElapsed =
+          candidateElapsed -
+          COLLISION_DEBUG_RAY_DELAY_SECONDS -
+          COLLISION_DEBUG_RAY_GROW_SECONDS * COLLISION_DEBUG_POINT_RAY_PROGRESS;
         const pointProgress = easeOutBack(
           clamp01(pointElapsed / COLLISION_DEBUG_POINT_GROW_SECONDS),
         );
 
         const color = readCollisionCandidateColor(candidate);
-        const end = candidate.direction
-          .clone()
-          .multiplyScalar(snapshot.maxDistance * rayProgress);
+        const end = candidate.direction.clone().multiplyScalar(snapshot.maxDistance * rayProgress);
         writeLineSegment(rayPositions, visibleCount, end);
         writeLineColor(rayColors, visibleCount, color);
         writePointInstance(
@@ -1494,10 +1525,7 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
           snapshot.maxDistance,
           pointProgress,
         );
-        points.setColorAt(
-          visibleCount,
-          readCollisionCandidatePointColor(candidate),
-        );
+        points.setColorAt(visibleCount, readCollisionCandidatePointColor(candidate));
         visibleCount += 1;
       }
       loggedCandidateCount = Math.max(loggedCandidateCount, visibleCount);
@@ -1518,12 +1546,9 @@ function createCollisionAvoidanceDebugOverlay(maxRayCount) {
 }
 
 function readVisibleCollisionCandidates(snapshot) {
-  const selectedIndex = snapshot.visualSelectedIndex >= 0
-    ? snapshot.visualSelectedIndex
-    : snapshot.selectedIndex;
-  const endIndex = selectedIndex >= 0
-    ? selectedIndex
-    : snapshot.candidateRays.length - 1;
+  const selectedIndex =
+    snapshot.visualSelectedIndex >= 0 ? snapshot.visualSelectedIndex : snapshot.selectedIndex;
+  const endIndex = selectedIndex >= 0 ? selectedIndex : snapshot.candidateRays.length - 1;
   return snapshot.candidateRays.slice(0, endIndex + 1);
 }
 
@@ -1563,9 +1588,7 @@ function readCollisionCandidateColor(candidate) {
   }
 
   const hitsWall = candidate.visualHitsWall ?? candidate.hitsWall;
-  return hitsWall
-    ? collisionDebugColors.wall
-    : collisionDebugColors.blocked;
+  return hitsWall ? collisionDebugColors.wall : collisionDebugColors.blocked;
 }
 
 function readCollisionCandidatePointColor(candidate) {
@@ -1603,11 +1626,7 @@ function logCollisionCandidate(snapshot, candidate, visibleOrder) {
 }
 
 function vectorToDebugString(vector) {
-  return [
-    vector.x.toFixed(3),
-    vector.y.toFixed(3),
-    vector.z.toFixed(3),
-  ].join(", ");
+  return [vector.x.toFixed(3), vector.y.toFixed(3), vector.z.toFixed(3)].join(", ");
 }
 
 function formatDebugDistance(distance) {
@@ -1643,10 +1662,9 @@ function updateObstacleRay() {
   obstacleRay.visible = true;
   getFishHeadPose(fish, obstacleRayPose);
   const rayDistance = simulationSettings.collisionAvoidDistance;
-  obstacleRayEnd.copy(obstacleRayPose.position).addScaledVector(
-    obstacleRayPose.direction,
-    rayDistance,
-  );
+  obstacleRayEnd
+    .copy(obstacleRayPose.position)
+    .addScaledVector(obstacleRayPose.direction, rayDistance);
 
   obstacleRay.geometry.setPositions([
     obstacleRayPose.position.x,
@@ -1662,10 +1680,7 @@ function updateObstacleRay() {
     obstacleRayPose.direction,
     rayDistance,
   );
-  const hitsWall = !simulation.isInsideAquarium(
-    obstacleRayEnd,
-    simulationSettings.boundsRadius,
-  );
+  const hitsWall = !simulation.isInsideAquarium(obstacleRayEnd, simulationSettings.boundsRadius);
 
   obstacleRay.material.color.copy(
     hitsObstacle || hitsWall ? obstacleRayColors.hit : obstacleRayColors.clear,
@@ -1829,9 +1844,7 @@ function bindCameraPanel(rig) {
   window.addEventListener("blur", () => rig.setFreeCameraPanning(false));
 
   function update() {
-    freeCameraButton.textContent = rig.isFreeCameraEnabled
-      ? "Animated Camera"
-      : "Free Camera";
+    freeCameraButton.textContent = rig.isFreeCameraEnabled ? "Animated Camera" : "Free Camera";
     freeCameraButton.setAttribute("aria-pressed", String(rig.isFreeCameraEnabled));
   }
 
@@ -1918,8 +1931,7 @@ function syncRenderControls() {
   renderControls.frameInput.value = String(currentRenderFrame);
   renderControls.frameRange.max = String(maxFrame);
   renderControls.frameRange.value = String(currentRenderFrame);
-  renderControls.frameCount.value =
-    `${currentRenderFrame + 1} / ${renderTimelineTotalFrames}`;
+  renderControls.frameCount.value = `${currentRenderFrame + 1} / ${renderTimelineTotalFrames}`;
   const exportDisabled = renderOptions.isExportMode;
   if (renderControls.exportFrameButton) {
     renderControls.exportFrameButton.disabled = exportDisabled;
@@ -1938,8 +1950,8 @@ async function exportCurrentFrame() {
   const filename = `boids-frame-${String(currentRenderFrame).padStart(4, "0")}.png`;
   setExportButtonsDisabled(true);
   status.textContent =
-    `Exporting ${exportSize.width}x${exportSize.height} frame `
-    + `${currentRenderFrame + 1}/${renderTimelineTotalFrames}...`;
+    `Exporting ${exportSize.width}x${exportSize.height} frame ` +
+    `${currentRenderFrame + 1}/${renderTimelineTotalFrames}...`;
 
   try {
     const blob = await renderFixedSizePngBlob({
@@ -1966,8 +1978,8 @@ async function exportSequence() {
   const filename = `boids-frames-${String(renderTimelineTotalFrames).padStart(4, "0")}.zip`;
   setExportButtonsDisabled(true);
   status.textContent =
-    `Exporting ${renderTimelineTotalFrames} frames at `
-    + `${exportSize.width}x${exportSize.height}...`;
+    `Exporting ${renderTimelineTotalFrames} frames at ` +
+    `${exportSize.width}x${exportSize.height}...`;
 
   try {
     const blob = await renderFixedSizeZipBlob({
@@ -1976,8 +1988,8 @@ async function exportSequence() {
       renderScale,
       onFrame: (frame) => {
         status.textContent =
-          `Exporting ${exportSize.width}x${exportSize.height} frame `
-          + `${frame + 1}/${renderTimelineTotalFrames}...`;
+          `Exporting ${exportSize.width}x${exportSize.height} frame ` +
+          `${frame + 1}/${renderTimelineTotalFrames}...`;
       },
     });
     downloadBlob(blob, filename);
