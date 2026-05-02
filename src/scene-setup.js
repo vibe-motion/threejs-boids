@@ -110,7 +110,6 @@ export function addAquarium(scene) {
   floorEdges.position.copy(floor.position);
   group.add(floorEdges);
 
-  effects.push(addBubbleColumns(group));
   scene.add(group);
 
   return {
