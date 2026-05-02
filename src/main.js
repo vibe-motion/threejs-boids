@@ -60,6 +60,11 @@ const INTRO_DROP_FISH_X_SPEED = -1.15;
 const INTRO_DROP_FISH_Z = 3;
 const INTRO_DROP_ENTRY_SPEED = 30;
 const INTRO_DROP_WATER_DRAG_STRENGTH = 7.5;
+const INTRO_WATER_FLOW_PATH_COUNT = 5;
+const INTRO_WATER_FLOW_PATH_POINTS = 10;
+const INTRO_WATER_FLOW_SAMPLE_DISTANCE = 0.32;
+const INTRO_WATER_FLOW_FADE_SECONDS = 0.4;
+const INTRO_WATER_FLOW_VISIBLE_THRESHOLD = 0.035;
 const INTRO_DROP_START_Y = aquariumHalfSize.y - fishConfig.length * 0.55;
 const introDropDirection = new THREE.Vector3(
   INTRO_DROP_FISH_X_SPEED,
@@ -215,6 +220,7 @@ let collisionAvoidanceSnapshot = null;
 let collisionDebugRevealGapSeconds = 0;
 let collisionDebugRevealElapsedSeconds = 0;
 let postAvoidanceSwimElapsedSeconds = 0;
+const introWaterFlowEffect = createIntroWaterFlowEffect();
 const obstacleRay = createObstacleRay();
 const obstacleRayPose = {
   position: new THREE.Vector3(),
@@ -230,6 +236,7 @@ const lighting = addLighting(scene);
 lighting.setIntensity(DEFAULT_LIGHT_INTENSITY);
 const aquariumEffects = addAquarium(scene);
 const worldAxes = addWorldAxes(scene);
+scene.add(introWaterFlowEffect.group);
 scene.add(obstacleRay);
 scene.add(collisionDebugOverlay.group);
 const obstacleMeshes = addObstacles(scene, obstacles);
@@ -683,6 +690,7 @@ function resetTimelineState() {
   collisionDebugRevealElapsedSeconds = 0;
   postAvoidanceSwimElapsedSeconds = 0;
   simulationPaused = false;
+  introWaterFlowEffect.reset();
   collisionDebugOverlay.reset();
   applySimulationSettingsFromControls();
   simulation.reset(INTRO_TIMELINE_ENABLED ? 0 : readControlValue("count"));
@@ -765,6 +773,12 @@ function stepIntroTimelineFrame(frameDt) {
       simulation.fish[fishConfig.highlightedIndex],
       simulationDt,
     );
+    introWaterFlowEffect.update(
+      simulation.fish[fishConfig.highlightedIndex],
+      simulationTime,
+    );
+  } else {
+    introWaterFlowEffect.reset();
   }
 
   applyIntroTimelineState(introTimelineTime);
@@ -1053,6 +1067,171 @@ function createObstacleRay() {
   line.frustumCulled = false;
   line.renderOrder = 20;
   return line;
+}
+
+function createIntroWaterFlowEffect() {
+  const group = new THREE.Group();
+  group.visible = false;
+  group.renderOrder = 18;
+
+  const paths = [];
+  const samples = [];
+  const pathColor = new THREE.Color(0xffffff);
+  const forward = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  const point = new THREE.Vector3();
+  const worldUp = new THREE.Vector3(0, 1, 0);
+  const fallbackRight = new THREE.Vector3(1, 0, 0);
+
+  for (let i = 0; i < INTRO_WATER_FLOW_PATH_COUNT; i += 1) {
+    const positions = new Float32Array(INTRO_WATER_FLOW_PATH_POINTS * 3);
+    const geometry = new LineGeometry();
+    geometry.setPositions(positions);
+    const material = new LineMaterial({
+      color: pathColor,
+      linewidth: 3,
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const line = new Line2(geometry, material);
+    line.frustumCulled = false;
+    line.renderOrder = 18;
+    group.add(line);
+    paths.push({
+      geometry,
+      line,
+      material,
+      positions,
+      offset: i - (INTRO_WATER_FLOW_PATH_COUNT - 1) / 2,
+      depth: ((i * 3) % 5) - 2,
+      weight: 0.7 + ((i * 3) % 5) * 0.08,
+    });
+  }
+
+  function reset() {
+    group.visible = false;
+    samples.length = 0;
+    for (const path of paths) {
+      path.material.opacity = 0;
+    }
+  }
+
+  function addPathSample(fish, dropElapsedSeconds, strength) {
+    const previousSample = samples[samples.length - 1];
+    if (
+      previousSample
+      && previousSample.position.distanceToSquared(fish.position)
+        < INTRO_WATER_FLOW_SAMPLE_DISTANCE * INTRO_WATER_FLOW_SAMPLE_DISTANCE
+    ) {
+      previousSample.strength = Math.max(previousSample.strength, strength);
+      previousSample.time = dropElapsedSeconds;
+      return;
+    }
+
+    forward.copy(fish.velocity).normalize();
+    right.crossVectors(forward, worldUp);
+    if (right.lengthSq() < 0.000001) {
+      right.crossVectors(forward, fallbackRight);
+    }
+    right.normalize();
+    up.crossVectors(right, forward).normalize();
+
+    samples.push({
+      position: fish.position.clone(),
+      right: right.clone(),
+      up: up.clone(),
+      time: dropElapsedSeconds,
+      strength,
+    });
+
+    if (samples.length > INTRO_WATER_FLOW_PATH_POINTS) {
+      samples.shift();
+    }
+  }
+
+  return {
+    group,
+    reset,
+    setResolution(width, height) {
+      for (const path of paths) {
+        path.material.resolution.set(width, height);
+      }
+    },
+    update(fish, dropElapsedSeconds) {
+      if (!fish || fish.velocity.lengthSq() < 0.000001) {
+        reset();
+        return;
+      }
+
+      const waterElapsedSeconds = dropElapsedSeconds - INTRO_DROP_WATER_ENTRY_SECONDS;
+      if (waterElapsedSeconds <= 0) {
+        reset();
+        return;
+      }
+
+      const speedRange = INTRO_DROP_ENTRY_SPEED - INTRO_DROP_FISH_SPEED;
+      const currentSpeed = readIntroDropWaterDragSpeed(dropElapsedSeconds);
+      const dragProgress = clamp01(
+        (currentSpeed - INTRO_DROP_FISH_SPEED) / Math.max(0.001, speedRange),
+      );
+      const fadeIn = clamp01(waterElapsedSeconds / 0.06);
+      const visibility = clamp01(dragProgress * 1.55) * fadeIn;
+
+      if (visibility >= INTRO_WATER_FLOW_VISIBLE_THRESHOLD) {
+        addPathSample(fish, dropElapsedSeconds, visibility);
+      }
+
+      let strongestSample = 0;
+      for (let i = samples.length - 1; i >= 0; i -= 1) {
+        const sample = samples[i];
+        const age = dropElapsedSeconds - sample.time;
+        sample.alpha = sample.strength * clamp01(1 - age / INTRO_WATER_FLOW_FADE_SECONDS);
+        strongestSample = Math.max(strongestSample, sample.alpha);
+        if (sample.alpha <= INTRO_WATER_FLOW_VISIBLE_THRESHOLD * 0.35) {
+          samples.splice(i, 1);
+        }
+      }
+
+      if (samples.length <= 0 || strongestSample < INTRO_WATER_FLOW_VISIBLE_THRESHOLD) {
+        reset();
+        return;
+      }
+
+      group.visible = true;
+      const pathSpread = fishConfig.radius * (0.42 + 0.9 * strongestSample);
+      const newestIndex = samples.length - 1;
+
+      for (let i = 0; i < paths.length; i += 1) {
+        const path = paths[i];
+        const lateralOffset = path.offset * pathSpread * 0.42;
+        const depthOffset = path.depth * pathSpread * 0.12;
+
+        for (let p = 0; p < INTRO_WATER_FLOW_PATH_POINTS; p += 1) {
+          const sampleIndex = Math.max(0, newestIndex - p);
+          const sample = samples[sampleIndex] ?? samples[0];
+          const wave = Math.sin(sample.time * 28 + i * 1.7)
+            * 0.018
+            * sample.alpha;
+
+          point.copy(sample.position)
+            .addScaledVector(sample.right, lateralOffset + wave)
+            .addScaledVector(sample.up, depthOffset - wave * 0.5);
+
+          const offset = p * 3;
+          path.positions[offset] = point.x;
+          path.positions[offset + 1] = point.y;
+          path.positions[offset + 2] = point.z;
+        }
+
+        path.geometry.setPositions(path.positions);
+        path.material.linewidth = (1.6 + 3.1 * strongestSample) * path.weight;
+        path.material.opacity = (0.08 + 0.42 * strongestSample) * path.weight;
+      }
+    },
+  };
 }
 
 function createCollisionAvoidanceDebugOverlay(maxRayCount) {
@@ -1389,6 +1568,7 @@ function resize() {
 
 function syncRayLineResolution(width, height) {
   aquariumEffects.setResolution(width, height);
+  introWaterFlowEffect.setResolution(width, height);
   obstacleRay.material.resolution.set(width, height);
   collisionDebugOverlay.setResolution(width, height);
 }
