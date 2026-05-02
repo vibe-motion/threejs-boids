@@ -50,6 +50,8 @@ const INTRO_BOX_OVERSHOOT_SCALE = 1.045;
 const INTRO_BOX_OVERSHOOT_PROGRESS = 0.68;
 const INTRO_FISH_DROP_SECONDS = 1;
 const INTRO_DROP_FISH_SPEED = 10.85;
+const INTRO_DROP_FISH_X_SPEED = -1.15;
+const INTRO_DROP_FISH_Z = 3;
 const INTRO_DROP_COLLISION_AVOID_DISTANCE = 2.4;
 const INTRO_DROP_MAX_TURN_RATE = 6;
 const COLLISION_DEBUG_POINT_GROW_SECONDS = 0.07;
@@ -768,9 +770,13 @@ function ensureIntroDropFish() {
     position: new THREE.Vector3(
       0,
       aquariumHalfSize.y - fishConfig.length * 0.55,
+      INTRO_DROP_FISH_Z,
+    ),
+    velocity: new THREE.Vector3(
+      INTRO_DROP_FISH_X_SPEED,
+      -INTRO_DROP_FISH_SPEED,
       0,
     ),
-    velocity: new THREE.Vector3(0, -INTRO_DROP_FISH_SPEED, 0),
     collisionAvoidanceDirection: null,
   });
   syncFishMeshWithSimulation();
