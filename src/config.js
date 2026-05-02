@@ -8,17 +8,18 @@ export const waterLevelY = aquariumHalfSize.y - 0.72;
 export const fishConfig = {
   radius: 0.3,
   length: 0.8,
+  highlightedScale: 2,
   radialSegments: 36,
   heightSegments: 3,
   highlightedIndex: 0,
   bodyColor: new THREE.Color(0xf2f6ff),
-  highlightedColor: new THREE.Color(0xfff000),
+  highlightedColor: new THREE.Color(0xf2f6ff),
 };
 
 export const simulationSettings = {
   minSpeed: 2.8,
   maxSpeed: 7,
-  maxTurnRate: 1.4,
+  maxTurnRate: 18,
   perceptionRadius: 4.2,
   avoidanceRadius: 1.4,
   maxSteerForce: 4.2,
@@ -26,7 +27,7 @@ export const simulationSettings = {
   cohesionWeight: 1,
   separateWeight: 1,
   boundsRadius: 0.27,
-  avoidCollisionWeight: 10,
+  avoidCollisionWeight: 4,
   collisionAvoidDistance: 7,
   boundaryWeight: 9,
   boundaryMargin: 2.8,

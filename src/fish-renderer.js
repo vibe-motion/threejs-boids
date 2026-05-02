@@ -7,6 +7,7 @@ const outlineScale = new THREE.Vector3(1.09, 1.09, 1.09);
 const tmpDirection = new THREE.Vector3();
 const tmpQuaternion = new THREE.Quaternion();
 const tmpMatrix = new THREE.Matrix4();
+const tmpScale = new THREE.Vector3();
 
 export function createFishMesh(count) {
   const geometry = createFishGeometry();
@@ -31,7 +32,7 @@ export function createFishMesh(count) {
   outlineMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.boundingSphere = new THREE.Sphere(
     new THREE.Vector3(),
-    aquariumHalfSize.length() + fishConfig.length,
+    aquariumHalfSize.length() + fishConfig.length * fishConfig.highlightedScale,
   );
   outlineMesh.boundingSphere = mesh.boundingSphere;
   mesh.castShadow = true;
@@ -76,12 +77,21 @@ export function updateFishInstances(mesh, fish) {
     const currentFish = fish[i];
     const direction = tmpDirection.copy(currentFish.velocity).normalize();
     tmpQuaternion.setFromUnitVectors(upAxis, direction);
+    const fishScale = i === fishConfig.highlightedIndex ? fishConfig.highlightedScale : 1;
 
-    tmpMatrix.compose(currentFish.position, tmpQuaternion, unitScale);
+    tmpMatrix.compose(
+      currentFish.position,
+      tmpQuaternion,
+      tmpScale.copy(unitScale).multiplyScalar(fishScale),
+    );
     mesh.setMatrixAt(i, tmpMatrix);
 
     if (outlineMesh) {
-      tmpMatrix.compose(currentFish.position, tmpQuaternion, outlineScale);
+      tmpMatrix.compose(
+        currentFish.position,
+        tmpQuaternion,
+        tmpScale.copy(outlineScale).multiplyScalar(fishScale),
+      );
       outlineMesh.setMatrixAt(i, tmpMatrix);
     }
   }
