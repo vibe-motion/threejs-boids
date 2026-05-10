@@ -30,6 +30,7 @@ const DEFAULT_LIGHT_INTENSITY = 1.3;
 const INTERACTIVE_MAX_DELTA_SECONDS = 1 / 20;
 const DEFAULT_DISPLAY_MODE = "1";
 const CLICK_ADD_FISH_MAX_POINTER_DISTANCE = 6;
+const SIMULATION_SPEED_SCALE = 2;
 
 const textInputTypes = new Set([
   "date",
@@ -316,18 +317,19 @@ function animate(timestamp = 0) {
 }
 
 function stepSimulation(dt) {
-  simulationTime += dt;
+  const scaledDt = dt * SIMULATION_SPEED_SCALE;
+  simulationTime += scaledDt;
   const trace = simulation.update(
-    dt,
+    scaledDt,
     headingDebugger ? { traceIndex: headingDebugger.traceIndex } : undefined,
   );
   updateFishInstances(fishMesh, simulation.fish);
   headingDebugger?.sample({
-    dt,
+    dt: scaledDt,
     fish: simulation.fish[fishConfig.highlightedIndex],
     trace,
   });
-  cameraRig.updateFishCamera(simulation.fish[fishConfig.highlightedIndex], dt);
+  cameraRig.updateFishCamera(simulation.fish[fishConfig.highlightedIndex], scaledDt);
 }
 
 function renderScene(dt = 0) {

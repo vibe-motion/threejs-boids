@@ -259,19 +259,23 @@ export class FishSchoolSimulation {
 
     const radialDirection = this.tmpVecD.copy(position).multiplyScalar(1 / distance);
     const force = this.tmpVecE.set(0, 0, 0);
+    let pressure = 1;
 
     if (distance > targetRadius) {
-      const overshoot = THREE.MathUtils.clamp((distance - targetRadius) / targetRadius, 0, 1);
+      const overshoot = Math.max(0, (distance - targetRadius) / targetRadius);
+      pressure = 1 + overshoot * 3;
       force.addScaledVector(radialDirection, -1 - overshoot);
     } else if (distance < coreRadius) {
       const corePressure = 1 - distance / coreRadius;
+      pressure = 0.5 + corePressure * 1.5;
       force.addScaledVector(radialDirection, corePressure);
     } else {
       const inwardBias = 0.28 * (distance / targetRadius);
+      pressure = 0.55 + inwardBias;
       force.addScaledVector(radialDirection, -inwardBias);
     }
 
-    return this.steerTowards(force, velocity);
+    return this.steerTowards(force, velocity).multiplyScalar(pressure);
   }
 
   toroidalFlowForce(position, velocity, axis, phase) {
