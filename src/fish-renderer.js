@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { aquariumHalfSize, fishConfig } from "./config.js";
+import { fishConfig, schoolRenderRadius } from "./config.js";
 import { mulberry32 } from "./random.js";
 
 const FISH_COLOR_SEED = 20260503;
@@ -40,7 +40,7 @@ export function createFishMesh(count) {
   outlineMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.boundingSphere = new THREE.Sphere(
     new THREE.Vector3(),
-    aquariumHalfSize.length() + fishConfig.length * fishConfig.highlightedScale,
+    schoolRenderRadius + fishConfig.length * fishConfig.highlightedScale,
   );
   outlineMesh.boundingSphere = mesh.boundingSphere;
   mesh.castShadow = true;

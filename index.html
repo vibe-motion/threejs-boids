@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Three.js Fish Tank</title>
+    <title>Three.js Bait Ball</title>
     <link rel="stylesheet" href="./src/styles.css" />
     <script type="importmap">
       {
@@ -20,7 +20,7 @@
         <canvas id="scene" class="scene-canvas"></canvas>
         <div class="camera-frame" aria-hidden="true"></div>
       </section>
-      <section class="panel" aria-label="Fish tank controls">
+      <section class="panel" aria-label="Bait ball controls">
         <div class="playback-controls" aria-label="Simulation playback controls">
           <button id="playback-toggle" class="toggle-button" type="button" aria-pressed="false">
             Pause
@@ -30,8 +30,8 @@
 
         <label>
           Separation
-          <input id="separation" type="range" min="0" max="3" step="0.1" value="1.8" />
-          <output id="separation-value">1.8</output>
+          <input id="separation" type="range" min="0" max="3" step="0.1" value="1.4" />
+          <output id="separation-value">1.4</output>
         </label>
 
         <label>
@@ -42,20 +42,26 @@
 
         <label>
           Cohesion
-          <input id="cohesion" type="range" min="0" max="3" step="0.1" value="0.8" />
-          <output id="cohesion-value">0.8</output>
+          <input id="cohesion" type="range" min="0" max="3" step="0.1" value="0.9" />
+          <output id="cohesion-value">0.9</output>
+        </label>
+
+        <label>
+          Centering
+          <input id="centering" type="range" min="0" max="4" step="0.1" value="1.4" />
+          <output id="centering-value">1.4</output>
+        </label>
+
+        <label>
+          Swirl
+          <input id="swirl" type="range" min="0" max="4" step="0.1" value="1.9" />
+          <output id="swirl-value">1.9</output>
         </label>
 
         <label>
           Fish
-          <input id="count" type="range" min="1" max="72" step="1" value="64" />
+          <input id="count" type="range" min="1" max="256" step="1" value="64" />
           <output id="count-value">64</output>
-        </label>
-
-        <label>
-          Avoidance
-          <input id="avoidance" type="range" min="2" max="18" step="0.5" value="4" />
-          <output id="avoidance-value">4</output>
         </label>
 
         <label>

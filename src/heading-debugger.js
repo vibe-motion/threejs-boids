@@ -48,8 +48,6 @@ export function createHeadingDebugger({ enabled, frameLimit = DEFAULT_FRAME_LIMI
         ],
         speed: Number(fish.velocity.length().toFixed(3)),
         neighborCount: trace?.neighborCount ?? 0,
-        collisionAvoidanceActive: trace?.collisionAvoidanceActive ?? false,
-        boundaryAvoidanceActive: trace?.boundaryAvoidanceActive ?? false,
         componentMagnitudes,
       };
       samples.push(sample);
