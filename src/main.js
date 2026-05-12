@@ -26,7 +26,6 @@ const EXPORT_ASPECT_RATIO = EXPORT_WIDTH / EXPORT_HEIGHT;
 const DEFAULT_EXPORT_RENDER_SCALE = 2;
 const EXPORT_SETTLE_FRAMES = 2;
 const MAX_TIMELINE_FRAMES = 600;
-const DEFAULT_LIGHT_INTENSITY = 1.3;
 const INTERACTIVE_MAX_DELTA_SECONDS = 1 / 20;
 const DEFAULT_DISPLAY_MODE = "1";
 const CLICK_ADD_FISH_MAX_POINTER_DISTANCE = 6;
@@ -115,9 +114,7 @@ let timelinePlaying = true;
 let interactivePlaybackTimestamp = null;
 let cameraPanel = null;
 
-const lighting = addLighting(scene);
-lighting.setIntensity(DEFAULT_LIGHT_INTENSITY);
-
+addLighting(scene);
 applyRenderLayout();
 applySimulationSettingsFromControls();
 bindControls();
