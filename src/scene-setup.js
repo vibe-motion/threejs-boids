@@ -1,6 +1,9 @@
 import * as THREE from "three";
 
 const sceneBackgroundColor = new THREE.Color(0x05070a);
+const obstacleOutlineScale = new THREE.Vector3(1.04, 1.04, 1.04);
+const defaultObstacleBodyColor = new THREE.Color(0xffffff);
+const defaultObstacleOutlineColor = new THREE.Color(0x101010);
 
 const rendererToneMappingExposure = 1;
 const lightingSettings = {
@@ -69,4 +72,61 @@ export function addLighting(scene) {
     hemiLight,
     sun,
   };
+}
+
+export function addObstacles(scene, obstacles) {
+  const obstacleMeshes = [];
+
+  for (const obstacle of obstacles) {
+    const geometry = createObstacleGeometry(obstacle);
+    const mesh = new THREE.Mesh(geometry, createObstacleMaterial(obstacle));
+    mesh.position.copy(obstacle.position);
+    if (obstacle.rotationY) {
+      mesh.rotation.y = obstacle.rotationY;
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 2;
+
+    const outlineMesh = createObstacleOutline(geometry, obstacle);
+    mesh.add(outlineMesh);
+    mesh.userData.outlineMesh = outlineMesh;
+
+    scene.add(mesh);
+    obstacleMeshes.push({ obstacle, mesh });
+  }
+
+  return obstacleMeshes;
+}
+
+function createObstacleGeometry(obstacle) {
+  if ((obstacle.shape === "box" || obstacle.shape === "plate") && obstacle.size) {
+    return new THREE.BoxGeometry(obstacle.size.x, obstacle.size.y, obstacle.size.z);
+  }
+
+  return new THREE.SphereGeometry(obstacle.radius, 32, 18);
+}
+
+function createObstacleMaterial(obstacle) {
+  return new THREE.MeshStandardMaterial({
+    color: obstacle.bodyColor ?? defaultObstacleBodyColor,
+    roughness: 0.52,
+    metalness: 0.08,
+  });
+}
+
+function createObstacleOutline(geometry, obstacle) {
+  const outlineMaterial = new THREE.MeshBasicMaterial({
+    color: obstacle.outlineColor ?? defaultObstacleOutlineColor,
+    side: THREE.BackSide,
+    depthTest: true,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const outlineMesh = new THREE.Mesh(geometry, outlineMaterial);
+  outlineMesh.scale.copy(obstacleOutlineScale);
+  outlineMesh.castShadow = false;
+  outlineMesh.receiveShadow = false;
+  outlineMesh.renderOrder = 1;
+  return outlineMesh;
 }

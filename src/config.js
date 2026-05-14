@@ -30,4 +30,19 @@ export const simulationSettings = {
   toroidalFlowWeight: 1.9,
   toroidalRollWeight: 0.38,
   toroidalAxisSpeed: 0.42,
+  boundsRadius: 0.27,
+  avoidCollisionWeight: 4,
+  collisionAvoidDistance: 7,
+  sphereSeparationMargin: 4,
+  sphereSeparationWeight: 20,
 };
+
+export const obstacles = [
+  {
+    shape: "sphere",
+    position: new THREE.Vector3(3.6, -0.8, -2.35),
+    radius: 1.557692,
+    bodyColor: new THREE.Color(0xd91f1f),
+    outlineColor: new THREE.Color(0x050505),
+  },
+];

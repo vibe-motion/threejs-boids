@@ -1,16 +1,22 @@
 import * as THREE from "three";
-import { mulberry32 } from "./random.js";
+import {
+  createRayDirections,
+  mulberry32,
+} from "./random.js";
 
 const ORIGIN = new THREE.Vector3(0, 0, 0);
 const DEFAULT_FLOW_AXIS = new THREE.Vector3(0, 1, 0);
+const MIN_CACHED_CLEAR_DIRECTION_DOT = 0.5;
 
 export class FishSchoolSimulation {
-  constructor({ spawnHalfSize, settings }) {
+  constructor({ spawnHalfSize, obstacles = [], settings }) {
     this.spawnHalfSize = spawnHalfSize;
+    this.obstacles = obstacles;
     this.settings = settings;
     this.fish = [];
     this.random = mulberry32(42);
     this.elapsedTime = 0;
+    this.rayDirections = createRayDirections(300);
 
     this.tmpVecA = new THREE.Vector3();
     this.tmpVecB = new THREE.Vector3();
@@ -19,7 +25,9 @@ export class FishSchoolSimulation {
     this.tmpVecE = new THREE.Vector3();
     this.tmpVecF = new THREE.Vector3();
     this.tmpVecG = new THREE.Vector3();
+    this.tmpQuat = new THREE.Quaternion();
     this.flowAxis = DEFAULT_FLOW_AXIS.clone();
+    this.forwardAxis = new THREE.Vector3(0, 0, 1);
   }
 
   reset(count, seed = 42) {
@@ -58,6 +66,7 @@ export class FishSchoolSimulation {
     return {
       position,
       velocity: direction.multiplyScalar(speed),
+      collisionAvoidanceDirection: null,
     };
   }
 
@@ -108,6 +117,8 @@ export class FishSchoolSimulation {
         separation: new THREE.Vector3(),
         centering: new THREE.Vector3(),
         toroidal: new THREE.Vector3(),
+        sphereSeparation: new THREE.Vector3(),
+        obstacle: new THREE.Vector3(),
       } : null;
       const headingSum = new THREE.Vector3();
       const centerSum = new THREE.Vector3();
@@ -181,6 +192,34 @@ export class FishSchoolSimulation {
         components.toroidal.copy(toroidal);
       }
 
+      const sphereSeparation = this.sphereObstacleSeparationForce(
+        fish.position,
+        fish.velocity,
+      );
+      if (sphereSeparation.lengthSq() > 0) {
+        acceleration.add(sphereSeparation);
+        if (components) {
+          components.sphereSeparation.copy(sphereSeparation);
+        }
+      }
+
+      const forward = this.tmpVecB.copy(fish.velocity).normalize();
+      if (this.isHeadingForCollision(fish.position, forward)) {
+        const clearDirection = this.obstacleRays(fish.position, forward, fish);
+        const obstacle = this.steerTowards(
+          clearDirection,
+          fish.velocity,
+        ).multiplyScalar(
+          this.settings.avoidCollisionWeight,
+        );
+        acceleration.add(obstacle);
+        if (components) {
+          components.obstacle.copy(obstacle);
+        }
+      } else {
+        fish.collisionAvoidanceDirection = null;
+      }
+
       const desiredVelocity = fish.velocity.clone().add(acceleration.multiplyScalar(dt));
       const speed = THREE.MathUtils.clamp(
         desiredVelocity.length(),
@@ -220,6 +259,215 @@ export class FishSchoolSimulation {
 
     const desired = vector.clone().normalize().multiplyScalar(this.settings.maxSpeed);
     return desired.sub(velocity).clampLength(0, this.settings.maxSteerForce);
+  }
+
+  sphereObstacleSeparationForce(position, velocity) {
+    const margin = Math.max(0, this.settings.sphereSeparationMargin ?? 0);
+    const weight = Math.max(0, this.settings.sphereSeparationWeight ?? 0);
+    if (margin <= 0 || weight <= 0 || this.obstacles.length === 0) {
+      return new THREE.Vector3();
+    }
+
+    const away = new THREE.Vector3();
+    let maxPressure = 0;
+
+    for (const obstacle of this.obstacles) {
+      if (obstacle.shape !== "sphere" || !Number.isFinite(obstacle.radius)) {
+        continue;
+      }
+
+      const radius = obstacle.radius;
+      const influenceRadius = radius + margin;
+      const offset = this.tmpVecE.subVectors(position, obstacle.position);
+      const distanceSq = offset.lengthSq();
+
+      if (distanceSq >= influenceRadius * influenceRadius) {
+        continue;
+      }
+
+      let distance = Math.sqrt(distanceSq);
+      if (distance < 0.000001) {
+        offset.copy(velocity).multiplyScalar(-1);
+        if (offset.lengthSq() < 0.000001) {
+          offset.set(1, 0, 0);
+        }
+        distance = offset.length();
+      }
+
+      const surfaceDistance = distance - radius;
+      const pressure =
+        surfaceDistance >= 0
+          ? 1 - surfaceDistance / margin
+          : 1 + Math.min(1, -surfaceDistance / Math.max(radius, 0.000001));
+
+      away.addScaledVector(offset, pressure / distance);
+      maxPressure = Math.max(maxPressure, pressure);
+    }
+
+    if (away.lengthSq() < 0.000001) {
+      return away;
+    }
+
+    return this.steerTowards(away, velocity).multiplyScalar(weight * maxPressure);
+  }
+
+  isHeadingForCollision(position, forward) {
+    return (
+      this.obstacles.length > 0
+      && this.rayHitsObstacle(
+        position,
+        forward,
+        this.settings.collisionAvoidDistance,
+      )
+    );
+  }
+
+  obstacleRays(position, forward, fish = null) {
+    const cachedDirection = fish?.collisionAvoidanceDirection;
+
+    if (
+      cachedDirection
+      && cachedDirection.dot(forward) > MIN_CACHED_CLEAR_DIRECTION_DOT
+      && this.isDirectionClear(
+        position,
+        cachedDirection,
+        this.settings.collisionAvoidDistance,
+      )
+    ) {
+      return cachedDirection;
+    }
+
+    const result = this.findClearObstacleDirection(position, forward);
+    if (fish) {
+      if (!fish.collisionAvoidanceDirection) {
+        fish.collisionAvoidanceDirection = new THREE.Vector3();
+      }
+      fish.collisionAvoidanceDirection.copy(result.direction);
+      return fish.collisionAvoidanceDirection;
+    }
+
+    return result.direction;
+  }
+
+  findClearObstacleDirection(position, forward) {
+    const forwardDirection = forward.clone().normalize();
+    const maxDistance = this.settings.collisionAvoidDistance;
+    this.tmpQuat.setFromUnitVectors(this.forwardAxis, forwardDirection);
+
+    for (const localDirection of this.rayDirections) {
+      const direction = this.tmpVecA
+        .copy(localDirection)
+        .applyQuaternion(this.tmpQuat)
+        .normalize();
+
+      if (this.isDirectionClear(position, direction, maxDistance)) {
+        return {
+          direction: direction.clone(),
+        };
+      }
+    }
+
+    return {
+      direction: forwardDirection,
+    };
+  }
+
+  isDirectionClear(origin, direction, maxDistance) {
+    return (
+      this.obstacles.length === 0
+      || !this.rayHitsObstacle(origin, direction, maxDistance)
+    );
+  }
+
+  rayHitsObstacle(origin, direction, maxDistance) {
+    return Number.isFinite(this.rayObstacleHitDistance(origin, direction, maxDistance));
+  }
+
+  rayObstacleHitDistance(origin, direction, maxDistance = Infinity) {
+    if (this.obstacles.length === 0) {
+      return Infinity;
+    }
+
+    let nearestDistance = Infinity;
+
+    for (const obstacle of this.obstacles) {
+      const distance = this.raySingleObstacleHitDistance(
+        origin,
+        direction,
+        Math.min(maxDistance, nearestDistance),
+        obstacle,
+      );
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+      }
+    }
+
+    return nearestDistance <= maxDistance ? nearestDistance : Infinity;
+  }
+
+  raySingleObstacleHitDistance(origin, direction, maxDistance, obstacle) {
+    if ((obstacle.shape === "box" || obstacle.shape === "plate") && obstacle.size) {
+      return this.rayBoxObstacleHitDistance(origin, direction, maxDistance, obstacle);
+    }
+
+    return this.raySphereObstacleHitDistance(origin, direction, maxDistance, obstacle);
+  }
+
+  rayBoxObstacleHitDistance(origin, direction, maxDistance, obstacle) {
+    const localOrigin = this.tmpVecC.subVectors(origin, obstacle.position);
+    const localDirection = this.tmpVecD.copy(direction);
+
+    if (obstacle.rotationY) {
+      this.rotateAroundY(localOrigin, -obstacle.rotationY);
+      this.rotateAroundY(localDirection, -obstacle.rotationY);
+    }
+
+    const inset = this.settings.boundsRadius ?? 0;
+    const halfX = obstacle.size.x * 0.5 + inset;
+    const halfY = obstacle.size.y * 0.5 + inset;
+    const halfZ = obstacle.size.z * 0.5 + inset;
+
+    return rayExpandedBoxHitDistance(
+      localOrigin,
+      localDirection,
+      halfX,
+      halfY,
+      halfZ,
+      maxDistance,
+    );
+  }
+
+  raySphereObstacleHitDistance(origin, direction, maxDistance, obstacle) {
+    const radius = obstacle.radius + (this.settings.boundsRadius ?? 0);
+    const offset = this.tmpVecC.subVectors(origin, obstacle.position);
+    const b = offset.dot(direction);
+    const c = offset.lengthSq() - radius * radius;
+    const discriminant = b * b - c;
+
+    if (discriminant < 0) {
+      return Infinity;
+    }
+
+    const root = Math.sqrt(discriminant);
+    const near = -b - root;
+    const far = -b + root;
+
+    if (near >= 0 && near <= maxDistance) {
+      return near;
+    }
+
+    return far >= 0 && far <= maxDistance ? far : Infinity;
+  }
+
+  rotateAroundY(vector, angle) {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const x = vector.x;
+    const z = vector.z;
+
+    vector.x = x * cos + z * sin;
+    vector.z = -x * sin + z * cos;
+    return vector;
   }
 
   limitTurn(currentVelocity, desiredVelocity, dt) {
@@ -321,4 +569,59 @@ function normalizeFishCount(count, fallback) {
   }
 
   return Math.max(0, Math.floor(count));
+}
+
+function rayExpandedBoxHitDistance(origin, direction, halfX, halfY, halfZ, maxDistance) {
+  let near = 0;
+  let far = maxDistance;
+
+  if (Math.abs(direction.x) < 0.000001) {
+    if (origin.x < -halfX || origin.x > halfX) return Infinity;
+  } else {
+    const inverseDirection = 1 / direction.x;
+    let axisNear = (-halfX - origin.x) * inverseDirection;
+    let axisFar = (halfX - origin.x) * inverseDirection;
+    if (axisNear > axisFar) {
+      const swap = axisNear;
+      axisNear = axisFar;
+      axisFar = swap;
+    }
+    near = Math.max(near, axisNear);
+    far = Math.min(far, axisFar);
+    if (near > far) return Infinity;
+  }
+
+  if (Math.abs(direction.y) < 0.000001) {
+    if (origin.y < -halfY || origin.y > halfY) return Infinity;
+  } else {
+    const inverseDirection = 1 / direction.y;
+    let axisNear = (-halfY - origin.y) * inverseDirection;
+    let axisFar = (halfY - origin.y) * inverseDirection;
+    if (axisNear > axisFar) {
+      const swap = axisNear;
+      axisNear = axisFar;
+      axisFar = swap;
+    }
+    near = Math.max(near, axisNear);
+    far = Math.min(far, axisFar);
+    if (near > far) return Infinity;
+  }
+
+  if (Math.abs(direction.z) < 0.000001) {
+    if (origin.z < -halfZ || origin.z > halfZ) return Infinity;
+  } else {
+    const inverseDirection = 1 / direction.z;
+    let axisNear = (-halfZ - origin.z) * inverseDirection;
+    let axisFar = (halfZ - origin.z) * inverseDirection;
+    if (axisNear > axisFar) {
+      const swap = axisNear;
+      axisNear = axisFar;
+      axisFar = swap;
+    }
+    near = Math.max(near, axisNear);
+    far = Math.min(far, axisFar);
+    if (near > far) return Infinity;
+  }
+
+  return far >= 0 && near <= maxDistance ? near : Infinity;
 }

@@ -3,6 +3,7 @@ import { FishSchoolSimulation } from "./fish-school-simulation.js";
 import { createCameraRig } from "./camera-rig.js";
 import {
   fishConfig,
+  obstacles,
   schoolSpawnHalfSize,
   simulationSettings,
 } from "./config.js";
@@ -14,6 +15,7 @@ import {
 import { createHeadingDebugger } from "./heading-debugger.js";
 import {
   addLighting,
+  addObstacles,
   createRenderer,
   createScene,
 } from "./scene-setup.js";
@@ -62,6 +64,7 @@ const headingDebugger = createHeadingDebugger({
 });
 const simulation = new FishSchoolSimulation({
   spawnHalfSize: schoolSpawnHalfSize,
+  obstacles,
   settings: simulationSettings,
 });
 
@@ -104,6 +107,12 @@ const cameraViewPresets = {
     target: cameraViewTarget,
   },
 };
+const obstacleDragRaycaster = new THREE.Raycaster();
+const obstacleDragPointer = new THREE.Vector2();
+const obstacleDragPlane = new THREE.Plane();
+const obstacleDragPoint = new THREE.Vector3();
+const obstacleDragOffset = new THREE.Vector3();
+const obstacleDragCameraDirection = new THREE.Vector3();
 
 let fishMesh = null;
 let simulationTime = 0;
@@ -115,12 +124,14 @@ let interactivePlaybackTimestamp = null;
 let cameraPanel = null;
 
 addLighting(scene);
+const obstacleMeshes = addObstacles(scene, obstacles);
 applyRenderLayout();
 applySimulationSettingsFromControls();
 bindControls();
 bindPlaybackControls();
 bindDisplayModeControls();
 bindCameraViewControls(cameraRig);
+bindSphereObstaclePointerControls(obstacleMeshes);
 bindCanvasFishClickControls();
 cameraRig.setOrbitView(cameraViewPresets.default);
 cameraRig.setFreeCameraEnabled(true);
@@ -205,6 +216,122 @@ function bindCameraViewControls(rig) {
       cameraPanel?.update();
     });
   }
+}
+
+function bindSphereObstaclePointerControls(obstacleMeshes) {
+  const controlled = obstacleMeshes.find(({ obstacle }) => obstacle.shape === "sphere");
+  if (!controlled) return;
+
+  let dragState = null;
+
+  canvas.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.button !== 0 || isEditingText(event.target)) {
+        return;
+      }
+
+      updateObstacleDragRay(event);
+      const hit = obstacleDragRaycaster.intersectObject(controlled.mesh, false)[0];
+      if (!hit) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      cameraRig.activeCamera.getWorldDirection(obstacleDragCameraDirection);
+      obstacleDragPlane.setFromNormalAndCoplanarPoint(
+        obstacleDragCameraDirection,
+        controlled.obstacle.position,
+      );
+      obstacleDragRaycaster.ray.intersectPlane(obstacleDragPlane, obstacleDragPoint);
+      obstacleDragOffset.subVectors(controlled.obstacle.position, obstacleDragPoint);
+      dragState = {
+        pointerId: event.pointerId,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      canvas.style.cursor = "grabbing";
+    },
+    { capture: true },
+  );
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    updateObstacleDragRay(event);
+    if (!obstacleDragRaycaster.ray.intersectPlane(obstacleDragPlane, obstacleDragPoint)) {
+      return;
+    }
+
+    obstacleDragPoint.add(obstacleDragOffset);
+    moveSphereObstacleTo(controlled, obstacleDragPoint);
+  });
+
+  canvas.addEventListener("pointerup", (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    dragState = null;
+    canvas.style.cursor = "";
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  });
+
+  canvas.addEventListener("pointercancel", (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return;
+    }
+
+    dragState = null;
+    canvas.style.cursor = "";
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  });
+}
+
+function updateObstacleDragRay(event) {
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, rect.width);
+  const height = Math.max(1, rect.height);
+
+  obstacleDragPointer.set(
+    ((event.clientX - rect.left) / width) * 2 - 1,
+    -((event.clientY - rect.top) / height) * 2 + 1,
+  );
+  obstacleDragRaycaster.setFromCamera(obstacleDragPointer, cameraRig.activeCamera);
+}
+
+function moveSphereObstacleTo({ obstacle, mesh }, position) {
+  const radius = obstacle.radius ?? 0;
+
+  obstacle.position.set(
+    THREE.MathUtils.clamp(
+      position.x,
+      -schoolSpawnHalfSize.x + radius,
+      schoolSpawnHalfSize.x - radius,
+    ),
+    THREE.MathUtils.clamp(
+      position.y,
+      -schoolSpawnHalfSize.y + radius,
+      schoolSpawnHalfSize.y - radius,
+    ),
+    THREE.MathUtils.clamp(
+      position.z,
+      -schoolSpawnHalfSize.z + radius,
+      schoolSpawnHalfSize.z - radius,
+    ),
+  );
+  mesh.position.copy(obstacle.position);
+  renderCurrentFrame();
 }
 
 function bindCanvasFishClickControls() {

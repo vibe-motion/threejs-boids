@@ -1,3 +1,26 @@
+import * as THREE from "three";
+
+export function createRayDirections(count) {
+  const directions = [];
+  const goldenRatio = (1 + Math.sqrt(5)) / 2;
+  const angleIncrement = Math.PI * 2 * goldenRatio;
+
+  for (let i = 0; i < count; i += 1) {
+    const t = i / count;
+    const inclination = Math.acos(1 - 2 * t);
+    const azimuth = angleIncrement * i;
+    directions.push(
+      new THREE.Vector3(
+        Math.sin(inclination) * Math.cos(azimuth),
+        Math.sin(inclination) * Math.sin(azimuth),
+        Math.cos(inclination),
+      ),
+    );
+  }
+
+  return directions;
+}
+
 export function mulberry32(seed) {
   return function next() {
     let value = (seed += 0x6d2b79f5);
