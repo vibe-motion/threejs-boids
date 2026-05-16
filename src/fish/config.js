@@ -1,0 +1,26 @@
+import * as THREE from "three";
+
+export const fishConfig = {
+  radius: 0.3,
+  length: 0.8,
+  highlightedScale: 2,
+  radialSegments: 36,
+  heightSegments: 3,
+  highlightedIndex: 0,
+  bodyColor: new THREE.Color(0xf2f6ff),
+  highlightedColor: new THREE.Color(0xf2f6ff),
+  renderBoundsRadius: 17,
+  swimFrequencyMin: 1.4,
+  swimFrequencyMax: 3.2,
+  maxBankAngle: THREE.MathUtils.degToRad(12),
+  bankTurnScale: 0.18,
+  bankResponse: 8,
+  curveDeformationStrength: 0.72,
+  curveDeformationMax: 2.35,
+  curveDeformationResponse: 12,
+  swimCurveStrength: 0.92,
+  swimAccelerationThreshold: 0.35,
+  swimAccelerationFull: 2.4,
+  swimAccelerationPulseSeconds: 0.32,
+  swimTurnCurveStart: 0.08,
+};

@@ -10,6 +10,7 @@ import {
 import {
   createFishMesh,
   disposeFishMesh,
+  loadFishModel,
   updateFishInstances,
 } from "./fish-renderer.js";
 import { createHeadingDebugger } from "./heading-debugger.js";
@@ -136,6 +137,7 @@ bindCanvasFishClickControls();
 cameraRig.setOrbitView(cameraViewPresets.default);
 cameraRig.setFreeCameraEnabled(true);
 cameraPanel = bindCameraPanel(cameraRig);
+await loadFishModel();
 simulation.reset(readControlValue("count"));
 rebuildFishMesh();
 resize();

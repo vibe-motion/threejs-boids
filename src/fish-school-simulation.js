@@ -1,5 +1,10 @@
 import * as THREE from "three";
 import {
+  createFishMotionScratch,
+  createFishMotionState,
+  updateFishMotionState,
+} from "./fish/motion-state.js";
+import {
   createRayDirections,
   mulberry32,
 } from "./random.js";
@@ -17,6 +22,7 @@ export class FishSchoolSimulation {
     this.random = mulberry32(42);
     this.elapsedTime = 0;
     this.rayDirections = createRayDirections(300);
+    this.fishMotionScratch = createFishMotionScratch();
 
     this.tmpVecA = new THREE.Vector3();
     this.tmpVecB = new THREE.Vector3();
@@ -37,7 +43,7 @@ export class FishSchoolSimulation {
     this.elapsedTime = 0;
 
     for (let i = 0; i < targetCount; i += 1) {
-      this.fish.push(this.createFish());
+      this.fish.push(this.createFish(i));
     }
   }
 
@@ -50,11 +56,11 @@ export class FishSchoolSimulation {
     }
 
     while (this.fish.length < targetCount) {
-      this.fish.push(this.createFish());
+      this.fish.push(this.createFish(this.fish.length));
     }
   }
 
-  createFish() {
+  createFish(index = this.fish.length) {
     const position = this.createInitialPosition();
     const direction = this.createInitialDirection(position);
     const speed = THREE.MathUtils.lerp(
@@ -67,7 +73,12 @@ export class FishSchoolSimulation {
       position,
       velocity: direction.multiplyScalar(speed),
       collisionAvoidanceDirection: null,
+      ...this.createMotionState(index),
     };
+  }
+
+  createMotionState(index = this.fish.length) {
+    return createFishMotionState(index);
   }
 
   createInitialPosition() {
@@ -243,8 +254,10 @@ export class FishSchoolSimulation {
     }
 
     for (let i = 0; i < this.fish.length; i += 1) {
-      this.fish[i].velocity.copy(nextVelocities[i]);
-      this.fish[i].position.copy(nextPositions[i]);
+      const fish = this.fish[i];
+      updateFishMotionState(fish, nextVelocities[i], dt, this.fishMotionScratch);
+      fish.velocity.copy(nextVelocities[i]);
+      fish.position.copy(nextPositions[i]);
     }
 
     this.elapsedTime += dt;

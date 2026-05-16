@@ -1,18 +1,8 @@
 import * as THREE from "three";
 
-export const schoolSpawnHalfSize = new THREE.Vector3(8.5, 5.2, 6.6);
-export const schoolRenderRadius = schoolSpawnHalfSize.length() + 2;
+export { fishConfig } from "./fish/config.js";
 
-export const fishConfig = {
-  radius: 0.3,
-  length: 0.8,
-  highlightedScale: 1,
-  radialSegments: 36,
-  heightSegments: 3,
-  highlightedIndex: 0,
-  bodyColor: new THREE.Color(0xffffff),
-  highlightedColor: new THREE.Color(0xffffff),
-};
+export const schoolSpawnHalfSize = new THREE.Vector3(8.5, 5.2, 6.6);
 
 export const simulationSettings = {
   minSpeed: 2.8,
