@@ -21,8 +21,6 @@ import {
   addObstacles,
   createRenderer,
   createScene,
-  loadObstacleModels,
-  updateObstacleModelAppearance,
 } from "./scene-setup.js";
 
 const RENDER_FPS = 30;
@@ -83,26 +81,9 @@ const controls = {
   swirl: createControl("#swirl", "#swirl-value"),
   count: createControl("#count", "#count-value"),
   turnRate: createControl("#turn-rate", "#turn-rate-value"),
-  modelRotationX: createControl("#model-rotation-x", "#model-rotation-x-value"),
-  modelRotationY: createControl("#model-rotation-y", "#model-rotation-y-value"),
-  modelRotationZ: createControl("#model-rotation-z", "#model-rotation-z-value"),
-  modelBrightness: createControl("#model-brightness", "#model-brightness-value"),
-  modelEmissiveIntensity: createControl(
-    "#model-emissive-intensity",
-    "#model-emissive-intensity-value",
-  ),
   motionBlurIntensity: createControl("#motion-blur-intensity", "#motion-blur-intensity-value"),
 };
 
-const modelRotationControlKeys = new Set([
-  "modelRotationX",
-  "modelRotationY",
-  "modelRotationZ",
-]);
-const modelAppearanceControlKeys = new Set([
-  "modelBrightness",
-  "modelEmissiveIntensity",
-]);
 const renderAppearanceControlKeys = new Set(["motionBlurIntensity"]);
 
 const simulationControlSettings = {
@@ -154,11 +135,8 @@ addLighting(scene);
 const obstacleMeshes = addObstacles(scene, obstacles);
 applyRenderLayout();
 syncRenderAppearanceControlsFromConfig();
-syncModelAppearanceControlsFromConfig();
 applySimulationSettingsFromControls();
 applyRenderAppearanceFromControls();
-applyModelRotationFromControls();
-applyModelAppearanceFromControls();
 bindControls();
 bindPanelParameterCopyControl();
 bindPlaybackControls();
@@ -169,7 +147,7 @@ bindCanvasFishClickControls();
 cameraRig.setOrbitView(cameraViewPresets.default);
 cameraRig.setFreeCameraEnabled(true);
 cameraPanel = bindCameraPanel(cameraRig);
-await Promise.all([loadFishModel(), loadObstacleModels(obstacleMeshes)]);
+await loadFishModel();
 simulation.reset(readControlValue("count"));
 rebuildFishMesh();
 resize();
@@ -214,13 +192,6 @@ function readPanelParameterSnapshot() {
       swirl: readRoundedControlValue("swirl"),
       count: readRoundedControlValue("count"),
       turnRate: readRoundedControlValue("turnRate"),
-    },
-    model: {
-      modelRotationX: readRoundedControlValue("modelRotationX"),
-      modelRotationY: readRoundedControlValue("modelRotationY"),
-      modelRotationZ: readRoundedControlValue("modelRotationZ"),
-      modelBrightness: readRoundedControlValue("modelBrightness"),
-      modelEmissiveIntensity: readRoundedControlValue("modelEmissiveIntensity"),
     },
     render: {
       motionBlurIntensity: readRoundedControlValue("motionBlurIntensity"),
@@ -306,7 +277,7 @@ function bindSphereObstaclePointerControls(obstacleMeshes) {
       }
 
       updateObstacleDragRay(event);
-      const hit = obstacleDragRaycaster.intersectObject(controlled.mesh, true)[0];
+      const hit = obstacleDragRaycaster.intersectObject(controlled.mesh, false)[0];
       if (!hit) {
         return;
       }
@@ -472,18 +443,6 @@ function applyControlChange(key) {
     return;
   }
 
-  if (modelRotationControlKeys.has(key)) {
-    applyModelRotationFromControls();
-    renderCurrentFrame();
-    return;
-  }
-
-  if (modelAppearanceControlKeys.has(key)) {
-    applyModelAppearanceFromControls();
-    renderCurrentFrame();
-    return;
-  }
-
   if (renderAppearanceControlKeys.has(key)) {
     applyRenderAppearanceFromControls();
     renderCurrentFrame();
@@ -499,45 +458,13 @@ function applySimulationSettingsFromControls() {
   }
 }
 
-function applyModelRotationFromControls() {
-  const controlled = findControlledModelObstacle();
-  if (!controlled) return;
-
-  controlled.mesh.rotation.set(
-    THREE.MathUtils.degToRad(readControlValue("modelRotationX")),
-    THREE.MathUtils.degToRad(readControlValue("modelRotationY")),
-    THREE.MathUtils.degToRad(readControlValue("modelRotationZ")),
-  );
-}
-
-function syncModelAppearanceControlsFromConfig() {
-  const controlled = findControlledModelObstacle();
-  if (!controlled) return;
-
-  setControlValue("modelBrightness", controlled.obstacle.modelBrightness ?? 1);
-  setControlValue("modelEmissiveIntensity", controlled.obstacle.modelEmissiveIntensity ?? 0);
-}
-
 function syncRenderAppearanceControlsFromConfig() {
   setControlValue("motionBlurIntensity", renderSettings.motionBlurIntensity ?? 0);
-}
-
-function applyModelAppearanceFromControls() {
-  const controlled = findControlledModelObstacle();
-  if (!controlled) return;
-
-  controlled.obstacle.modelBrightness = readControlValue("modelBrightness");
-  controlled.obstacle.modelEmissiveIntensity = readControlValue("modelEmissiveIntensity");
-  updateObstacleModelAppearance(controlled.mesh, controlled.obstacle);
 }
 
 function applyRenderAppearanceFromControls() {
   renderSettings.motionBlurIntensity = readControlValue("motionBlurIntensity");
   globalMotionBlur.reset();
-}
-
-function findControlledModelObstacle() {
-  return obstacleMeshes.find(({ obstacle }) => obstacle.shape === "sphere" && obstacle.modelUrl);
 }
 
 function setFishCount(count) {
