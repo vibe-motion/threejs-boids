@@ -223,7 +223,7 @@ function bindPlaybackControls() {
     if (timelinePlaying) return;
 
     stepSimulation(STEP_FRAME_SECONDS);
-    renderScene(STEP_FRAME_SECONDS);
+    renderScene(STEP_FRAME_SECONDS, { resetMotionBlurHistory: true });
   });
 
   syncPlaybackControls();
@@ -518,7 +518,7 @@ function animate(timestamp = 0) {
     stepSimulation(dt);
   }
 
-  renderScene(dt);
+  renderScene(dt, { resetMotionBlurHistory: !timelinePlaying });
 }
 
 function stepSimulation(dt) {

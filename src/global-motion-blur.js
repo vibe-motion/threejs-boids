@@ -51,7 +51,7 @@ export function createGlobalMotionBlurRenderer(renderer) {
   const quadScene = new THREE.Scene();
   const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
-  const currentTarget = createRenderTarget();
+  const currentTarget = createRenderTarget({ depthBuffer: true });
   const historyTarget = createRenderTarget();
   const compositeTarget = createRenderTarget();
   const blendMaterial = new THREE.ShaderMaterial({
@@ -157,13 +157,13 @@ export function createGlobalMotionBlurRenderer(renderer) {
   }
 }
 
-function createRenderTarget() {
+function createRenderTarget({ depthBuffer = false } = {}) {
   const renderTarget = new THREE.WebGLRenderTarget(1, 1, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
     type: THREE.HalfFloatType,
-    depthBuffer: false,
+    depthBuffer,
     stencilBuffer: false,
   });
   renderTarget.texture.name = "GlobalMotionBlur.Target";
