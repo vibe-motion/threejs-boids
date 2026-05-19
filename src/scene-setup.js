@@ -1,9 +1,22 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-const sceneBackgroundColor = new THREE.Color(0x05070a);
+const sceneBackgroundColor = new THREE.Color(0xffffff);
 const obstacleOutlineScale = new THREE.Vector3(1.04, 1.04, 1.04);
 const defaultObstacleBodyColor = new THREE.Color(0xffffff);
 const defaultObstacleOutlineColor = new THREE.Color(0x101010);
+const defaultObstacleForward = new THREE.Vector3(0, 0, 1);
+const invisibleObstacleMaterial = new THREE.MeshBasicMaterial({
+  transparent: true,
+  opacity: 0,
+  depthWrite: false,
+  colorWrite: false,
+});
+const modelLoader = new GLTFLoader();
+const tmpObstacleBox = new THREE.Box3();
+const tmpObstacleCenter = new THREE.Vector3();
+const tmpObstacleForward = new THREE.Vector3();
+const tmpObstacleSize = new THREE.Vector3();
 
 const rendererToneMappingExposure = 1;
 const lightingSettings = {
@@ -84,19 +97,39 @@ export function addObstacles(scene, obstacles) {
     if (obstacle.rotationY) {
       mesh.rotation.y = obstacle.rotationY;
     }
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.castShadow = !obstacle.modelUrl;
+    mesh.receiveShadow = !obstacle.modelUrl;
     mesh.renderOrder = 2;
 
-    const outlineMesh = createObstacleOutline(geometry, obstacle);
-    mesh.add(outlineMesh);
-    mesh.userData.outlineMesh = outlineMesh;
+    if (obstacle.modelUrl) {
+      mesh.userData.modelUrl = obstacle.modelUrl;
+    } else {
+      const outlineMesh = createObstacleOutline(geometry, obstacle);
+      mesh.add(outlineMesh);
+      mesh.userData.outlineMesh = outlineMesh;
+    }
 
     scene.add(mesh);
     obstacleMeshes.push({ obstacle, mesh });
   }
 
   return obstacleMeshes;
+}
+
+export async function loadObstacleModels(obstacleMeshes) {
+  await Promise.all(
+    obstacleMeshes.map(async ({ obstacle, mesh }) => {
+      if (!obstacle.modelUrl) return;
+
+      try {
+        const gltf = await modelLoader.loadAsync(String(obstacle.modelUrl));
+        const model = normalizeObstacleModel(gltf.scene, obstacle);
+        mesh.add(model);
+      } catch (error) {
+        console.warn("Failed to load obstacle model.", error);
+      }
+    }),
+  );
 }
 
 function createObstacleGeometry(obstacle) {
@@ -108,11 +141,56 @@ function createObstacleGeometry(obstacle) {
 }
 
 function createObstacleMaterial(obstacle) {
+  if (obstacle.modelUrl) {
+    return invisibleObstacleMaterial;
+  }
+
   return new THREE.MeshStandardMaterial({
     color: obstacle.bodyColor ?? defaultObstacleBodyColor,
     roughness: 0.52,
     metalness: 0.08,
   });
+}
+
+function normalizeObstacleModel(source, obstacle) {
+  const model = source;
+  const wrapper = new THREE.Group();
+
+  model.updateMatrixWorld(true);
+  tmpObstacleBox.setFromObject(model);
+  tmpObstacleBox.getCenter(tmpObstacleCenter);
+  tmpObstacleBox.getSize(tmpObstacleSize);
+
+  const modelDiameter = Math.max(tmpObstacleSize.x, tmpObstacleSize.y, tmpObstacleSize.z, 0.0001);
+  const targetDiameter = (obstacle.modelDiameter ?? obstacle.radius * 2) || 1;
+  const scale = targetDiameter / modelDiameter;
+
+  model.position.sub(tmpObstacleCenter);
+  wrapper.scale.setScalar(scale);
+  wrapper.quaternion.setFromUnitVectors(
+    readObstacleModelForward(obstacle),
+    defaultObstacleForward,
+  );
+  wrapper.add(model);
+  wrapper.traverse((object) => {
+    if (!object.isMesh) return;
+
+    object.castShadow = true;
+    object.receiveShadow = true;
+  });
+
+  return wrapper;
+}
+
+function readObstacleModelForward(obstacle) {
+  const forward = obstacle.modelForward ?? defaultObstacleForward;
+  tmpObstacleForward.copy(forward);
+
+  if (tmpObstacleForward.lengthSq() < 0.000001) {
+    return tmpObstacleForward.copy(defaultObstacleForward);
+  }
+
+  return tmpObstacleForward.normalize();
 }
 
 function createObstacleOutline(geometry, obstacle) {

@@ -19,6 +19,7 @@ import {
   addObstacles,
   createRenderer,
   createScene,
+  loadObstacleModels,
 } from "./scene-setup.js";
 
 const RENDER_FPS = 30;
@@ -77,7 +78,16 @@ const controls = {
   swirl: createControl("#swirl", "#swirl-value"),
   count: createControl("#count", "#count-value"),
   turnRate: createControl("#turn-rate", "#turn-rate-value"),
+  modelRotationX: createControl("#model-rotation-x", "#model-rotation-x-value"),
+  modelRotationY: createControl("#model-rotation-y", "#model-rotation-y-value"),
+  modelRotationZ: createControl("#model-rotation-z", "#model-rotation-z-value"),
 };
+
+const modelRotationControlKeys = new Set([
+  "modelRotationX",
+  "modelRotationY",
+  "modelRotationZ",
+]);
 
 const simulationControlSettings = {
   separation: "separateWeight",
@@ -128,6 +138,7 @@ addLighting(scene);
 const obstacleMeshes = addObstacles(scene, obstacles);
 applyRenderLayout();
 applySimulationSettingsFromControls();
+applyModelRotationFromControls();
 bindControls();
 bindPlaybackControls();
 bindDisplayModeControls();
@@ -137,7 +148,7 @@ bindCanvasFishClickControls();
 cameraRig.setOrbitView(cameraViewPresets.default);
 cameraRig.setFreeCameraEnabled(true);
 cameraPanel = bindCameraPanel(cameraRig);
-await loadFishModel();
+await Promise.all([loadFishModel(), loadObstacleModels(obstacleMeshes)]);
 simulation.reset(readControlValue("count"));
 rebuildFishMesh();
 resize();
@@ -234,7 +245,7 @@ function bindSphereObstaclePointerControls(obstacleMeshes) {
       }
 
       updateObstacleDragRay(event);
-      const hit = obstacleDragRaycaster.intersectObject(controlled.mesh, false)[0];
+      const hit = obstacleDragRaycaster.intersectObject(controlled.mesh, true)[0];
       if (!hit) {
         return;
       }
@@ -379,6 +390,12 @@ function applyControlChange(key) {
     return;
   }
 
+  if (modelRotationControlKeys.has(key)) {
+    applyModelRotationFromControls();
+    renderCurrentFrame();
+    return;
+  }
+
   applySimulationSettingsFromControls();
 }
 
@@ -386,6 +403,17 @@ function applySimulationSettingsFromControls() {
   for (const [key, settingName] of Object.entries(simulationControlSettings)) {
     simulationSettings[settingName] = readControlValue(key);
   }
+}
+
+function applyModelRotationFromControls() {
+  const controlled = obstacleMeshes.find(({ obstacle }) => obstacle.shape === "sphere");
+  if (!controlled) return;
+
+  controlled.mesh.rotation.set(
+    THREE.MathUtils.degToRad(readControlValue("modelRotationX")),
+    THREE.MathUtils.degToRad(readControlValue("modelRotationY")),
+    THREE.MathUtils.degToRad(readControlValue("modelRotationZ")),
+  );
 }
 
 function setFishCount(count) {

@@ -32,7 +32,7 @@ export const obstacles = [
     shape: "sphere",
     position: new THREE.Vector3(3.6, -0.8, -2.35),
     radius: 1.557692,
-    bodyColor: new THREE.Color(0xd91f1f),
-    outlineColor: new THREE.Color(0x050505),
+    modelUrl: new URL("./fish/clawd.glb", import.meta.url),
+    modelForward: new THREE.Vector3(0, -1, 0),
   },
 ];
