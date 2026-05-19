@@ -1,9 +1,5 @@
 import * as THREE from "three";
 
-const oceanSurfaceColor = "#d8f5f0";
-const oceanUpperColor = "#8acbd0";
-const oceanMidDepthColor = "#4f929c";
-const oceanDeepColor = "#203f52";
 const obstacleOutlineScale = new THREE.Vector3(1.04, 1.04, 1.04);
 const defaultObstacleBodyColor = new THREE.Color(0xffffff);
 const defaultObstacleOutlineColor = new THREE.Color(0x101010);
@@ -44,118 +40,8 @@ export function createRenderer(canvas) {
 
 export function createScene({ transparentBackground = false } = {}) {
   const scene = new THREE.Scene();
-  scene.background = transparentBackground ? null : createOceanBackgroundTexture();
+  scene.background = transparentBackground ? null : new THREE.Color(0xffffff);
   return scene;
-}
-
-function createOceanBackgroundTexture() {
-  const size = 1024;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-
-  const context = canvas.getContext("2d");
-  const waterDepth = context.createLinearGradient(0, 0, 0, size);
-  waterDepth.addColorStop(0, oceanSurfaceColor);
-  waterDepth.addColorStop(0.3, oceanUpperColor);
-  waterDepth.addColorStop(0.66, oceanMidDepthColor);
-  waterDepth.addColorStop(1, oceanDeepColor);
-
-  context.fillStyle = waterDepth;
-  context.fillRect(0, 0, size, size);
-
-  context.save();
-  context.globalCompositeOperation = "screen";
-
-  const surfaceGlow = context.createRadialGradient(
-    size * 0.38,
-    -size * 0.08,
-    size * 0.02,
-    size * 0.38,
-    -size * 0.08,
-    size * 0.5,
-  );
-  surfaceGlow.addColorStop(0, "rgba(255, 255, 255, 0.86)");
-  surfaceGlow.addColorStop(0.34, "rgba(214, 249, 244, 0.48)");
-  surfaceGlow.addColorStop(1, "rgba(214, 249, 244, 0)");
-  context.fillStyle = surfaceGlow;
-  context.fillRect(0, 0, size, size);
-
-  drawSlantedLightShaft(context, size, {
-    apexX: 0.38,
-    apexY: -0.08,
-    leftX: 0.24,
-    leftY: 0.88,
-    rightX: 0.84,
-    rightY: 0.82,
-    blur: 30,
-    topColor: "rgba(255, 255, 255, 0.46)",
-    midColor: "rgba(226, 255, 251, 0.2)",
-  });
-  drawSlantedLightShaft(context, size, {
-    apexX: 0.4,
-    apexY: -0.06,
-    leftX: 0.38,
-    leftY: 0.74,
-    rightX: 0.7,
-    rightY: 0.8,
-    blur: 10,
-    topColor: "rgba(255, 255, 255, 0.5)",
-    midColor: "rgba(226, 255, 251, 0.16)",
-  });
-
-  context.restore();
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
-function drawSlantedLightShaft(
-  context,
-  size,
-  { apexX, apexY, leftX, leftY, rightX, rightY, blur, topColor, midColor },
-) {
-  const shaftGradient = context.createLinearGradient(
-    size * apexX,
-    size * apexY,
-    size * ((leftX + rightX) * 0.5),
-    size * Math.max(leftY, rightY),
-  );
-  shaftGradient.addColorStop(0, topColor);
-  shaftGradient.addColorStop(0.42, midColor);
-  shaftGradient.addColorStop(1, "rgba(226, 255, 251, 0)");
-
-  context.save();
-  context.filter = `blur(${blur}px)`;
-  context.fillStyle = shaftGradient;
-  context.beginPath();
-  context.moveTo(size * apexX, size * apexY);
-  context.bezierCurveTo(
-    size * (apexX - 0.04),
-    size * 0.2,
-    size * (leftX + 0.08),
-    size * 0.56,
-    size * leftX,
-    size * leftY,
-  );
-  context.quadraticCurveTo(
-    size * ((leftX + rightX) * 0.54),
-    size * (Math.max(leftY, rightY) + 0.04),
-    size * rightX,
-    size * rightY,
-  );
-  context.bezierCurveTo(
-    size * (rightX - 0.08),
-    size * 0.52,
-    size * (apexX + 0.11),
-    size * 0.18,
-    size * apexX,
-    size * apexY,
-  );
-  context.closePath();
-  context.fill();
-  context.restore();
 }
 
 export function addLighting(scene) {

@@ -28,7 +28,7 @@ export const simulationSettings = {
 };
 
 export const renderSettings = {
-  motionBlurIntensity: 0.4,
+  motionBlurIntensity: 0.55,
 };
 
 export const obstacles = [
