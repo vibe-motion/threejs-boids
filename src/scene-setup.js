@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
 const obstacleOutlineScale = new THREE.Vector3(1.04, 1.04, 1.04);
+const sceneBackgroundColor = new THREE.Color(0x3f576a);
 const defaultObstacleBodyColor = new THREE.Color(0xffffff);
 const defaultObstacleOutlineColor = new THREE.Color(0x101010);
 
@@ -40,7 +41,7 @@ export function createRenderer(canvas) {
 
 export function createScene({ transparentBackground = false } = {}) {
   const scene = new THREE.Scene();
-  scene.background = transparentBackground ? null : new THREE.Color(0xffffff);
+  scene.background = transparentBackground ? null : sceneBackgroundColor;
   return scene;
 }
 
