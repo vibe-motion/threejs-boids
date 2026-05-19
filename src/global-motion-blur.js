@@ -33,6 +33,20 @@ void main() {
 }
 `;
 
+// Offscreen blur targets store linear scene color; only the final canvas pass
+// should apply the renderer's tone mapping and output color space.
+const outputFragmentShader = `
+uniform sampler2D sourceTexture;
+
+varying vec2 vUv;
+
+void main() {
+  gl_FragColor = texture2D(sourceTexture, vUv);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;
+
 export function createGlobalMotionBlurRenderer(renderer) {
   const quadScene = new THREE.Scene();
   const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -50,6 +64,7 @@ export function createGlobalMotionBlurRenderer(renderer) {
     fragmentShader: blendFragmentShader,
     depthTest: false,
     depthWrite: false,
+    toneMapped: false,
   });
   const copyMaterial = new THREE.ShaderMaterial({
     uniforms: {
@@ -59,6 +74,17 @@ export function createGlobalMotionBlurRenderer(renderer) {
     fragmentShader: copyFragmentShader,
     depthTest: false,
     depthWrite: false,
+    toneMapped: false,
+  });
+  const outputMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      sourceTexture: { value: currentTarget.texture },
+    },
+    vertexShader,
+    fragmentShader: outputFragmentShader,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: true,
   });
   let historyReady = false;
 
@@ -80,7 +106,7 @@ export function createGlobalMotionBlurRenderer(renderer) {
 
       if (!historyReady || resetHistory) {
         copyTexture(currentTarget.texture, historyTarget);
-        copyTexture(currentTarget.texture, null);
+        outputTexture(currentTarget.texture);
         historyReady = true;
         return;
       }
@@ -90,7 +116,7 @@ export function createGlobalMotionBlurRenderer(renderer) {
       blendMaterial.uniforms.damp.value = damp;
       renderQuad(blendMaterial, compositeTarget);
       copyTexture(compositeTarget.texture, historyTarget);
-      copyTexture(compositeTarget.texture, null);
+      outputTexture(compositeTarget.texture);
     },
 
     reset() {
@@ -118,6 +144,11 @@ export function createGlobalMotionBlurRenderer(renderer) {
     renderQuad(copyMaterial, target);
   }
 
+  function outputTexture(texture) {
+    outputMaterial.uniforms.sourceTexture.value = texture;
+    renderQuad(outputMaterial, null);
+  }
+
   function renderQuad(material, target) {
     quad.material = material;
     renderer.setRenderTarget(target);
@@ -131,6 +162,7 @@ function createRenderTarget() {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType,
     depthBuffer: false,
     stencilBuffer: false,
   });
