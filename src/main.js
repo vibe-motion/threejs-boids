@@ -4,6 +4,7 @@ import { createCameraRig } from "./camera-rig.js";
 import {
   fishConfig,
   obstacles,
+  renderSettings,
   schoolSpawnHalfSize,
   simulationSettings,
 } from "./config.js";
@@ -13,6 +14,7 @@ import {
   loadFishModel,
   updateFishInstances,
 } from "./fish-renderer.js";
+import { createGlobalMotionBlurRenderer } from "./global-motion-blur.js";
 import { createHeadingDebugger } from "./heading-debugger.js";
 import {
   addLighting,
@@ -35,6 +37,7 @@ const INTERACTIVE_MAX_DELTA_SECONDS = 1 / 20;
 const DEFAULT_DISPLAY_MODE = "1";
 const CLICK_ADD_FISH_MAX_POINTER_DISTANCE = 6;
 const SIMULATION_SPEED_SCALE = 2;
+const MOTION_BLUR_EXPORT_HISTORY_FRAMES = 6;
 
 const textInputTypes = new Set([
   "date",
@@ -57,6 +60,7 @@ const canvas = getRequiredElement("#scene");
 const query = new URLSearchParams(window.location.search);
 const renderOptions = readRenderOptions(query);
 const renderer = createRenderer(canvas);
+const globalMotionBlur = createGlobalMotionBlurRenderer(renderer);
 const scene = createScene({
   transparentBackground: renderOptions.transparentBackground,
 });
@@ -87,6 +91,7 @@ const controls = {
     "#model-emissive-intensity",
     "#model-emissive-intensity-value",
   ),
+  motionBlurIntensity: createControl("#motion-blur-intensity", "#motion-blur-intensity-value"),
 };
 
 const modelRotationControlKeys = new Set([
@@ -98,6 +103,7 @@ const modelAppearanceControlKeys = new Set([
   "modelBrightness",
   "modelEmissiveIntensity",
 ]);
+const renderAppearanceControlKeys = new Set(["motionBlurIntensity"]);
 
 const simulationControlSettings = {
   separation: "separateWeight",
@@ -147,8 +153,10 @@ let cameraPanel = null;
 addLighting(scene);
 const obstacleMeshes = addObstacles(scene, obstacles);
 applyRenderLayout();
+syncRenderAppearanceControlsFromConfig();
 syncModelAppearanceControlsFromConfig();
 applySimulationSettingsFromControls();
+applyRenderAppearanceFromControls();
 applyModelRotationFromControls();
 applyModelAppearanceFromControls();
 bindControls();
@@ -213,6 +221,9 @@ function readPanelParameterSnapshot() {
       modelRotationZ: readRoundedControlValue("modelRotationZ"),
       modelBrightness: readRoundedControlValue("modelBrightness"),
       modelEmissiveIntensity: readRoundedControlValue("modelEmissiveIntensity"),
+    },
+    render: {
+      motionBlurIntensity: readRoundedControlValue("motionBlurIntensity"),
     },
   };
 }
@@ -473,6 +484,12 @@ function applyControlChange(key) {
     return;
   }
 
+  if (renderAppearanceControlKeys.has(key)) {
+    applyRenderAppearanceFromControls();
+    renderCurrentFrame();
+    return;
+  }
+
   applySimulationSettingsFromControls();
 }
 
@@ -501,6 +518,10 @@ function syncModelAppearanceControlsFromConfig() {
   setControlValue("modelEmissiveIntensity", controlled.obstacle.modelEmissiveIntensity ?? 0);
 }
 
+function syncRenderAppearanceControlsFromConfig() {
+  setControlValue("motionBlurIntensity", renderSettings.motionBlurIntensity ?? 0);
+}
+
 function applyModelAppearanceFromControls() {
   const controlled = findControlledModelObstacle();
   if (!controlled) return;
@@ -508,6 +529,11 @@ function applyModelAppearanceFromControls() {
   controlled.obstacle.modelBrightness = readControlValue("modelBrightness");
   controlled.obstacle.modelEmissiveIntensity = readControlValue("modelEmissiveIntensity");
   updateObstacleModelAppearance(controlled.mesh, controlled.obstacle);
+}
+
+function applyRenderAppearanceFromControls() {
+  renderSettings.motionBlurIntensity = readControlValue("motionBlurIntensity");
+  globalMotionBlur.reset();
 }
 
 function findControlledModelObstacle() {
@@ -584,14 +610,17 @@ function stepSimulation(dt) {
   cameraRig.updateFishCamera(simulation.fish[fishConfig.highlightedIndex], scaledDt);
 }
 
-function renderScene(dt = 0) {
+function renderScene(dt = 0, { resetMotionBlurHistory = false } = {}) {
   cameraRig.update(dt);
   cameraPanel?.update();
-  renderer.render(scene, cameraRig.activeCamera);
+  globalMotionBlur.render(scene, cameraRig.activeCamera, {
+    intensity: renderSettings.motionBlurIntensity,
+    resetHistory: resetMotionBlurHistory,
+  });
 }
 
 function renderCurrentFrame() {
-  renderScene(0);
+  renderScene(0, { resetMotionBlurHistory: true });
 }
 
 function setTimelinePlaying(playing) {
@@ -601,14 +630,28 @@ function setTimelinePlaying(playing) {
 
 function renderAbsoluteFrame(frame, { render = true } = {}) {
   const clampedFrame = clampFrame(frame, renderTimelineTotalFrames);
+  const warmupStartFrame =
+    render && renderSettings.motionBlurIntensity > 0
+      ? Math.max(0, clampedFrame - MOTION_BLUR_EXPORT_HISTORY_FRAMES)
+      : clampedFrame;
 
   resetTimelineState();
-  for (let i = 0; i < clampedFrame; i += 1) {
+  for (let i = 0; i < warmupStartFrame; i += 1) {
     stepSimulation(STEP_FRAME_SECONDS);
   }
 
-  if (render) {
-    renderScene(0);
+  if (!render) {
+    for (let i = warmupStartFrame; i < clampedFrame; i += 1) {
+      stepSimulation(STEP_FRAME_SECONDS);
+    }
+    return;
+  }
+
+  globalMotionBlur.reset();
+  renderScene(0, { resetMotionBlurHistory: true });
+  for (let i = warmupStartFrame; i < clampedFrame; i += 1) {
+    stepSimulation(STEP_FRAME_SECONDS);
+    renderScene(STEP_FRAME_SECONDS);
   }
 }
 
@@ -661,6 +704,7 @@ function resize() {
   renderer.setPixelRatio(pixelRatio);
   cameraRig.resize(width, height);
   renderer.setSize(width, height, false);
+  globalMotionBlur.setSize(width, height, pixelRatio);
   cameraPanel?.update();
   renderCurrentFrame();
 }

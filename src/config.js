@@ -27,6 +27,10 @@ export const simulationSettings = {
   sphereSeparationWeight: 20,
 };
 
+export const renderSettings = {
+  motionBlurIntensity: 0.18,
+};
+
 export const obstacles = [
   {
     shape: "sphere",
