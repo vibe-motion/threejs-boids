@@ -20,6 +20,7 @@ import {
   createRenderer,
   createScene,
   loadObstacleModels,
+  updateObstacleModelAppearance,
 } from "./scene-setup.js";
 
 const RENDER_FPS = 30;
@@ -81,12 +82,21 @@ const controls = {
   modelRotationX: createControl("#model-rotation-x", "#model-rotation-x-value"),
   modelRotationY: createControl("#model-rotation-y", "#model-rotation-y-value"),
   modelRotationZ: createControl("#model-rotation-z", "#model-rotation-z-value"),
+  modelBrightness: createControl("#model-brightness", "#model-brightness-value"),
+  modelEmissiveIntensity: createControl(
+    "#model-emissive-intensity",
+    "#model-emissive-intensity-value",
+  ),
 };
 
 const modelRotationControlKeys = new Set([
   "modelRotationX",
   "modelRotationY",
   "modelRotationZ",
+]);
+const modelAppearanceControlKeys = new Set([
+  "modelBrightness",
+  "modelEmissiveIntensity",
 ]);
 
 const simulationControlSettings = {
@@ -137,9 +147,12 @@ let cameraPanel = null;
 addLighting(scene);
 const obstacleMeshes = addObstacles(scene, obstacles);
 applyRenderLayout();
+syncModelAppearanceControlsFromConfig();
 applySimulationSettingsFromControls();
 applyModelRotationFromControls();
+applyModelAppearanceFromControls();
 bindControls();
+bindPanelParameterCopyControl();
 bindPlaybackControls();
 bindDisplayModeControls();
 bindCameraViewControls(cameraRig);
@@ -165,6 +178,43 @@ function bindControls() {
       applyControlChange(key);
     });
   }
+}
+
+function bindPanelParameterCopyControl() {
+  const copyButton = getRequiredElement("#copy-panel-params");
+  const copyStatus = getRequiredElement("#copy-panel-params-status");
+  let copyStatusTimeout = 0;
+
+  copyButton.addEventListener("click", async () => {
+    const json = JSON.stringify(readPanelParameterSnapshot(), null, 2);
+    const copied = await copyText(json);
+    copyStatus.textContent = copied ? "Copied panel params" : "Copy failed";
+    window.clearTimeout(copyStatusTimeout);
+    copyStatusTimeout = window.setTimeout(() => {
+      copyStatus.textContent = "";
+    }, 1800);
+  });
+}
+
+function readPanelParameterSnapshot() {
+  return {
+    simulation: {
+      separation: readRoundedControlValue("separation"),
+      alignment: readRoundedControlValue("alignment"),
+      cohesion: readRoundedControlValue("cohesion"),
+      centering: readRoundedControlValue("centering"),
+      swirl: readRoundedControlValue("swirl"),
+      count: readRoundedControlValue("count"),
+      turnRate: readRoundedControlValue("turnRate"),
+    },
+    model: {
+      modelRotationX: readRoundedControlValue("modelRotationX"),
+      modelRotationY: readRoundedControlValue("modelRotationY"),
+      modelRotationZ: readRoundedControlValue("modelRotationZ"),
+      modelBrightness: readRoundedControlValue("modelBrightness"),
+      modelEmissiveIntensity: readRoundedControlValue("modelEmissiveIntensity"),
+    },
+  };
 }
 
 function bindPlaybackControls() {
@@ -396,6 +446,12 @@ function applyControlChange(key) {
     return;
   }
 
+  if (modelAppearanceControlKeys.has(key)) {
+    applyModelAppearanceFromControls();
+    renderCurrentFrame();
+    return;
+  }
+
   applySimulationSettingsFromControls();
 }
 
@@ -406,7 +462,7 @@ function applySimulationSettingsFromControls() {
 }
 
 function applyModelRotationFromControls() {
-  const controlled = obstacleMeshes.find(({ obstacle }) => obstacle.shape === "sphere");
+  const controlled = findControlledModelObstacle();
   if (!controlled) return;
 
   controlled.mesh.rotation.set(
@@ -414,6 +470,27 @@ function applyModelRotationFromControls() {
     THREE.MathUtils.degToRad(readControlValue("modelRotationY")),
     THREE.MathUtils.degToRad(readControlValue("modelRotationZ")),
   );
+}
+
+function syncModelAppearanceControlsFromConfig() {
+  const controlled = findControlledModelObstacle();
+  if (!controlled) return;
+
+  setControlValue("modelBrightness", controlled.obstacle.modelBrightness ?? 1);
+  setControlValue("modelEmissiveIntensity", controlled.obstacle.modelEmissiveIntensity ?? 0);
+}
+
+function applyModelAppearanceFromControls() {
+  const controlled = findControlledModelObstacle();
+  if (!controlled) return;
+
+  controlled.obstacle.modelBrightness = readControlValue("modelBrightness");
+  controlled.obstacle.modelEmissiveIntensity = readControlValue("modelEmissiveIntensity");
+  updateObstacleModelAppearance(controlled.mesh, controlled.obstacle);
+}
+
+function findControlledModelObstacle() {
+  return obstacleMeshes.find(({ obstacle }) => obstacle.shape === "sphere" && obstacle.modelUrl);
 }
 
 function setFishCount(count) {
@@ -776,6 +853,18 @@ function readControlValue(key) {
   return readInputNumber(controls[key].input);
 }
 
+function readRoundedControlValue(key) {
+  return roundPanelNumber(readControlValue(key));
+}
+
+function setControlValue(key, value) {
+  const control = controls[key];
+  if (!control) return;
+
+  control.input.value = String(value);
+  syncControlOutput(control);
+}
+
 function syncControlOutput({ input, output }) {
   output.value = input.value;
 }
@@ -783,6 +872,10 @@ function syncControlOutput({ input, output }) {
 function readInputNumber(input) {
   const value = Number(input.value);
   return Number.isFinite(value) ? value : 0;
+}
+
+function roundPanelNumber(value) {
+  return Number(value.toFixed(4));
 }
 
 function getRequiredInput(selector) {

@@ -149,6 +149,15 @@ button:disabled:hover {
   margin-bottom: 12px;
 }
 
+.panel-action-controls {
+  display: grid;
+  margin-top: 14px;
+}
+
+.panel-action-controls button {
+  width: 100%;
+}
+
 .toggle-button[aria-pressed="true"] {
   background: #7c4e56;
 }

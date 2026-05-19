@@ -5,6 +5,7 @@ const sceneBackgroundColor = new THREE.Color(0xffffff);
 const obstacleOutlineScale = new THREE.Vector3(1.04, 1.04, 1.04);
 const defaultObstacleBodyColor = new THREE.Color(0xffffff);
 const defaultObstacleOutlineColor = new THREE.Color(0x101010);
+const defaultObstacleModelEmissiveColor = new THREE.Color(0xffffff);
 const defaultObstacleForward = new THREE.Vector3(0, 0, 1);
 const invisibleObstacleMaterial = new THREE.MeshBasicMaterial({
   transparent: true,
@@ -17,6 +18,7 @@ const tmpObstacleBox = new THREE.Box3();
 const tmpObstacleCenter = new THREE.Vector3();
 const tmpObstacleForward = new THREE.Vector3();
 const tmpObstacleSize = new THREE.Vector3();
+const obstacleModelMaterialStates = new WeakMap();
 
 const rendererToneMappingExposure = 1;
 const lightingSettings = {
@@ -124,12 +126,24 @@ export async function loadObstacleModels(obstacleMeshes) {
       try {
         const gltf = await modelLoader.loadAsync(String(obstacle.modelUrl));
         const model = normalizeObstacleModel(gltf.scene, obstacle);
+        mesh.userData.obstacleModel = model;
         mesh.add(model);
       } catch (error) {
         console.warn("Failed to load obstacle model.", error);
       }
     }),
   );
+}
+
+export function updateObstacleModelAppearance(mesh, obstacle) {
+  const model = mesh?.userData?.obstacleModel;
+  if (!model) return;
+
+  model.traverse((object) => {
+    if (!object.isMesh) return;
+
+    applyObstacleModelMaterialAppearance(object.material, obstacle);
+  });
 }
 
 function createObstacleGeometry(obstacle) {
@@ -177,9 +191,86 @@ function normalizeObstacleModel(source, obstacle) {
 
     object.castShadow = true;
     object.receiveShadow = true;
+    object.material = createObstacleModelMaterial(object.material, obstacle);
   });
 
   return wrapper;
+}
+
+function createObstacleModelMaterial(material, obstacle) {
+  if (Array.isArray(material)) {
+    return material.map((entry) => createObstacleModelMaterial(entry, obstacle));
+  }
+
+  if (!material?.clone) {
+    return material;
+  }
+
+  const cloned = material.clone();
+  captureObstacleModelMaterialState(cloned);
+  applyObstacleModelMaterialAppearance(cloned, obstacle);
+  return cloned;
+}
+
+function captureObstacleModelMaterialState(material) {
+  if (obstacleModelMaterialStates.has(material)) {
+    return;
+  }
+
+  obstacleModelMaterialStates.set(material, {
+    color: material.color?.isColor ? material.color.clone() : null,
+    emissive: material.emissive?.isColor ? material.emissive.clone() : null,
+    emissiveIntensity: readNonNegativeNumber(material.emissiveIntensity, 1),
+  });
+}
+
+function applyObstacleModelMaterialAppearance(material, obstacle) {
+  if (Array.isArray(material)) {
+    material.forEach((entry) => applyObstacleModelMaterialAppearance(entry, obstacle));
+    return;
+  }
+
+  if (!material) {
+    return;
+  }
+
+  captureObstacleModelMaterialState(material);
+
+  const state = obstacleModelMaterialStates.get(material);
+  const brightness = readPositiveNumber(obstacle.modelBrightness, 1);
+  const emissiveIntensity = readNonNegativeNumber(obstacle.modelEmissiveIntensity, 0);
+
+  if (state.color && material.color?.isColor) {
+    material.color.copy(state.color).multiplyScalar(brightness);
+  }
+
+  if (state.emissive && material.emissive?.isColor) {
+    material.emissive.copy(state.emissive);
+    material.emissiveIntensity = state.emissiveIntensity;
+
+    if (emissiveIntensity > 0) {
+      if (obstacle.modelEmissiveColor) {
+        material.emissive.set(obstacle.modelEmissiveColor);
+      } else if (state.color) {
+        material.emissive.copy(state.color).multiplyScalar(brightness);
+      } else {
+        material.emissive.copy(defaultObstacleModelEmissiveColor);
+      }
+      material.emissiveIntensity = emissiveIntensity;
+    }
+  }
+
+  material.needsUpdate = true;
+}
+
+function readPositiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function readNonNegativeNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
 }
 
 function readObstacleModelForward(obstacle) {

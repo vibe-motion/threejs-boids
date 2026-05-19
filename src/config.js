@@ -34,5 +34,7 @@ export const obstacles = [
     radius: 1.557692,
     modelUrl: new URL("./fish/clawd.glb", import.meta.url),
     modelForward: new THREE.Vector3(0, -1, 0),
+    modelBrightness: 1.58,
+    modelEmissiveIntensity: 0,
   },
 ];
