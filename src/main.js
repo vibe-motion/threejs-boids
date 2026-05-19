@@ -375,26 +375,47 @@ function updateObstacleDragRay(event) {
 
 function moveSphereObstacleTo({ obstacle, mesh }, position) {
   const radius = obstacle.radius ?? 0;
+  const movementBounds = readObstacleMovementBounds(obstacle, radius);
 
   obstacle.position.set(
     THREE.MathUtils.clamp(
       position.x,
-      -schoolSpawnHalfSize.x + radius,
-      schoolSpawnHalfSize.x - radius,
+      movementBounds.min.x,
+      movementBounds.max.x,
     ),
     THREE.MathUtils.clamp(
       position.y,
-      -schoolSpawnHalfSize.y + radius,
-      schoolSpawnHalfSize.y - radius,
+      movementBounds.min.y,
+      movementBounds.max.y,
     ),
     THREE.MathUtils.clamp(
       position.z,
-      -schoolSpawnHalfSize.z + radius,
-      schoolSpawnHalfSize.z - radius,
+      movementBounds.min.z,
+      movementBounds.max.z,
     ),
   );
   mesh.position.copy(obstacle.position);
   renderCurrentFrame();
+}
+
+function readObstacleMovementBounds(obstacle, radius) {
+  if (obstacle.movementBounds?.min && obstacle.movementBounds?.max) {
+    return obstacle.movementBounds;
+  }
+
+  const movementHalfSize = obstacle.movementHalfSize ?? schoolSpawnHalfSize;
+  return {
+    min: {
+      x: -movementHalfSize.x + radius,
+      y: -movementHalfSize.y + radius,
+      z: -movementHalfSize.z + radius,
+    },
+    max: {
+      x: movementHalfSize.x - radius,
+      y: movementHalfSize.y - radius,
+      z: movementHalfSize.z - radius,
+    },
+  };
 }
 
 function bindCanvasFishClickControls() {
