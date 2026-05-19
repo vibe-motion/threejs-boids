@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-const sceneBackgroundColor = new THREE.Color(0xffffff);
+const oceanBackgroundCenterColor = "#b8ded9";
+const oceanBackgroundMidColor = "#7dbfc1";
+const oceanBackgroundEdgeColor = "#4f929c";
 const obstacleOutlineScale = new THREE.Vector3(1.04, 1.04, 1.04);
 const defaultObstacleBodyColor = new THREE.Color(0xffffff);
 const defaultObstacleOutlineColor = new THREE.Color(0x101010);
@@ -56,8 +58,35 @@ export function createRenderer(canvas) {
 
 export function createScene({ transparentBackground = false } = {}) {
   const scene = new THREE.Scene();
-  scene.background = transparentBackground ? null : sceneBackgroundColor.clone();
+  scene.background = transparentBackground ? null : createOceanBackgroundTexture();
   return scene;
+}
+
+function createOceanBackgroundTexture() {
+  const size = 1024;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const context = canvas.getContext("2d");
+  const gradient = context.createRadialGradient(
+    size * 0.5,
+    size * 0.48,
+    size * 0.05,
+    size * 0.5,
+    size * 0.52,
+    size * 0.72,
+  );
+  gradient.addColorStop(0, oceanBackgroundCenterColor);
+  gradient.addColorStop(0.56, oceanBackgroundMidColor);
+  gradient.addColorStop(1, oceanBackgroundEdgeColor);
+
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }
 
 export function addLighting(scene) {
