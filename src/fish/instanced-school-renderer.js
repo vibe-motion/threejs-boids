@@ -73,15 +73,63 @@ varying vec3 vColor;
 
 void main() {
   float center = 1.0 - abs(vSide);
-  float core = smoothstep(0.42, 1.0, center);
+  float core = smoothstep(0.24, 1.0, center);
   float tailFade = pow(1.0 - smoothstep(0.56, 1.0, vProgress), 1.45);
   float headFade = smoothstep(0.0, 0.035, vProgress);
-  float edgeFade = smoothstep(0.0, 0.22, center);
+  float edgeFade = pow(smoothstep(0.0, 0.58, center), 1.35);
   float energy = mix(0.82, 0.13, vProgress) * vPulse;
   vec3 color = vColor * energy + uCoreColor * core * (0.92 + 0.44 * tailFade);
   float alpha = uOpacity * tailFade * max(headFade, 0.36) * edgeFade;
 
   gl_FragColor = vec4(color, alpha);
+}
+`;
+
+const headGlowVertexShader = /* glsl */ `
+uniform float uGlowLength;
+
+varying vec3 vGlowViewNormal;
+varying vec3 vGlowViewPosition;
+varying float vGlowProgress;
+
+void main() {
+  vec4 instancePosition = vec4(position, 1.0);
+  vec3 instanceNormal = normal;
+
+  #ifdef USE_INSTANCING
+    instancePosition = instanceMatrix * instancePosition;
+    instanceNormal = mat3(instanceMatrix) * instanceNormal;
+  #endif
+
+  vec4 worldPosition = modelMatrix * instancePosition;
+  vec4 viewPosition = viewMatrix * worldPosition;
+
+  vGlowViewNormal = normalize(normalMatrix * instanceNormal);
+  vGlowViewPosition = viewPosition.xyz;
+  vGlowProgress = clamp(-position.y / max(0.0001, uGlowLength), 0.0, 1.0);
+
+  gl_Position = projectionMatrix * viewPosition;
+}
+`;
+
+const headGlowFragmentShader = /* glsl */ `
+uniform vec3 uGlowColor;
+uniform float uGlowOpacity;
+
+varying vec3 vGlowViewNormal;
+varying vec3 vGlowViewPosition;
+varying float vGlowProgress;
+
+void main() {
+  vec3 viewDirection = normalize(-vGlowViewPosition);
+  float facing = abs(dot(normalize(vGlowViewNormal), viewDirection));
+  float silhouetteFade = smoothstep(0.0, 0.62, facing);
+  float tipFade = smoothstep(0.0, 0.16, vGlowProgress);
+  float tailFade = 1.0 - smoothstep(0.7, 1.0, vGlowProgress);
+  float bodyFade = pow(tipFade * tailFade, 0.85);
+  float alpha = uGlowOpacity * silhouetteFade * bodyFade;
+
+  gl_FragColor = vec4(uGlowColor, alpha);
 }
 `;
 
@@ -344,14 +392,21 @@ function createHeadMaterial() {
 }
 
 function createHeadGlowMaterial() {
-  return new THREE.MeshBasicMaterial({
-    color: new THREE.Color(0.26, 1.22, 2.2),
+  return new THREE.ShaderMaterial({
+    name: "NeonArrowHeadGlowMaterial",
     transparent: true,
-    opacity: 0.22,
     blending: THREE.AdditiveBlending,
     depthTest: true,
     depthWrite: false,
+    side: THREE.DoubleSide,
     toneMapped: false,
+    uniforms: {
+      uGlowColor: { value: new THREE.Color(0.26, 1.22, 2.2) },
+      uGlowOpacity: { value: 0.28 },
+      uGlowLength: { value: fishConfig.arrowLength * 1.18 },
+    },
+    vertexShader: headGlowVertexShader,
+    fragmentShader: headGlowFragmentShader,
   });
 }
 

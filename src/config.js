@@ -33,7 +33,7 @@ export const renderSettings = {
     threshold: 0.28,
     knee: 0.14,
     radius: 0.3,
-    strength: 0.38,
+    strength: 0.25,
     levels: 5,
   },
 };
