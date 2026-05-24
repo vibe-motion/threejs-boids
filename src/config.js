@@ -28,7 +28,14 @@ export const simulationSettings = {
 };
 
 export const renderSettings = {
-  motionBlurIntensity: 0.55,
+  motionBlurIntensity: 0.28,
+  bloom: {
+    threshold: 0.28,
+    knee: 0.14,
+    radius: 0.3,
+    strength: 0.38,
+    levels: 5,
+  },
 };
 
 export const obstacles = [

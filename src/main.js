@@ -542,6 +542,7 @@ function renderScene(dt = 0, { resetMotionBlurHistory = false } = {}) {
   cameraPanel?.update();
   globalMotionBlur.render(scene, cameraRig.activeCamera, {
     intensity: renderSettings.motionBlurIntensity,
+    bloom: renderSettings.bloom,
     resetHistory: resetMotionBlurHistory,
   });
 }
