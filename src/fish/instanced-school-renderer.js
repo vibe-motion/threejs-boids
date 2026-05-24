@@ -49,7 +49,7 @@ void main() {
   }
   sideDirection = normalize(sideDirection);
 
-  float taper = pow(1.0 - progress, uTaperPower);
+  float taper = 1.0 - pow(progress, uTaperPower);
   float width = mix(uTailWidth, uHeadWidth, taper) * trailStyle.y;
   float pulse = 0.96 + 0.04 * sin(trailStyle.z * 1.7 + progress * 17.0);
   vec3 worldPosition = worldCenter.xyz + sideDirection * trailSide * width * pulse;
