@@ -4,10 +4,8 @@ import {
   createFishMotionState,
   updateFishMotionState,
 } from "./fish/motion-state.js";
-import {
-  createRayDirections,
-  mulberry32,
-} from "./random.js";
+import { resetFishTrailHistory, updateFishTrailHistory } from "./fish/trail-history.js";
+import { createRayDirections, mulberry32 } from "./random.js";
 
 const ORIGIN = new THREE.Vector3(0, 0, 0);
 const DEFAULT_FLOW_AXIS = new THREE.Vector3(0, 1, 0);
@@ -60,6 +58,12 @@ export class FishSchoolSimulation {
     }
   }
 
+  resetTrailHistories() {
+    for (const fish of this.fish) {
+      resetFishTrailHistory(fish);
+    }
+  }
+
   createFish(index = this.fish.length) {
     const position = this.createInitialPosition();
     const direction = this.createInitialDirection(position);
@@ -69,12 +73,14 @@ export class FishSchoolSimulation {
       this.random(),
     );
 
-    return {
+    const fish = {
       position,
       velocity: direction.multiplyScalar(speed),
       collisionAvoidanceDirection: null,
       ...this.createMotionState(index),
     };
+    resetFishTrailHistory(fish);
+    return fish;
   }
 
   createMotionState(index = this.fish.length) {
@@ -105,11 +111,7 @@ export class FishSchoolSimulation {
     const angle = this.random() * Math.PI * 2;
     const radius = Math.sqrt(Math.max(0, 1 - z * z));
 
-    return new THREE.Vector3(
-      Math.cos(angle) * radius,
-      z,
-      Math.sin(angle) * radius,
-    );
+    return new THREE.Vector3(Math.cos(angle) * radius, z, Math.sin(angle) * radius);
   }
 
   update(dt, options = {}) {
@@ -122,15 +124,18 @@ export class FishSchoolSimulation {
     for (let i = 0; i < this.fish.length; i += 1) {
       const fish = this.fish[i];
       const acceleration = new THREE.Vector3();
-      const components = options.traceIndex === i ? {
-        align: new THREE.Vector3(),
-        cohesion: new THREE.Vector3(),
-        separation: new THREE.Vector3(),
-        centering: new THREE.Vector3(),
-        toroidal: new THREE.Vector3(),
-        sphereSeparation: new THREE.Vector3(),
-        obstacle: new THREE.Vector3(),
-      } : null;
+      const components =
+        options.traceIndex === i
+          ? {
+              align: new THREE.Vector3(),
+              cohesion: new THREE.Vector3(),
+              separation: new THREE.Vector3(),
+              centering: new THREE.Vector3(),
+              toroidal: new THREE.Vector3(),
+              sphereSeparation: new THREE.Vector3(),
+              obstacle: new THREE.Vector3(),
+            }
+          : null;
       const headingSum = new THREE.Vector3();
       const centerSum = new THREE.Vector3();
       const separationSum = new THREE.Vector3();
@@ -162,13 +167,8 @@ export class FishSchoolSimulation {
         const cohesion = this.steerTowards(
           centerSum.sub(fish.position),
           fish.velocity,
-        ).multiplyScalar(
-          this.settings.cohesionWeight,
-        );
-        const separation = this.steerTowards(
-          separationSum,
-          fish.velocity,
-        ).multiplyScalar(
+        ).multiplyScalar(this.settings.cohesionWeight);
+        const separation = this.steerTowards(separationSum, fish.velocity).multiplyScalar(
           this.settings.separateWeight,
         );
 
@@ -183,10 +183,9 @@ export class FishSchoolSimulation {
         }
       }
 
-      const centering = this.sphericalEnvelopeForce(
-        fish.position,
-        fish.velocity,
-      ).multiplyScalar(this.settings.centeringWeight);
+      const centering = this.sphericalEnvelopeForce(fish.position, fish.velocity).multiplyScalar(
+        this.settings.centeringWeight,
+      );
       acceleration.add(centering);
       if (components) {
         components.centering.copy(centering);
@@ -203,10 +202,7 @@ export class FishSchoolSimulation {
         components.toroidal.copy(toroidal);
       }
 
-      const sphereSeparation = this.sphereObstacleSeparationForce(
-        fish.position,
-        fish.velocity,
-      );
+      const sphereSeparation = this.sphereObstacleSeparationForce(fish.position, fish.velocity);
       if (sphereSeparation.lengthSq() > 0) {
         acceleration.add(sphereSeparation);
         if (components) {
@@ -217,10 +213,7 @@ export class FishSchoolSimulation {
       const forward = this.tmpVecB.copy(fish.velocity).normalize();
       if (this.isHeadingForCollision(fish.position, forward)) {
         const clearDirection = this.obstacleRays(fish.position, forward, fish);
-        const obstacle = this.steerTowards(
-          clearDirection,
-          fish.velocity,
-        ).multiplyScalar(
+        const obstacle = this.steerTowards(clearDirection, fish.velocity).multiplyScalar(
           this.settings.avoidCollisionWeight,
         );
         acceleration.add(obstacle);
@@ -258,6 +251,7 @@ export class FishSchoolSimulation {
       updateFishMotionState(fish, nextVelocities[i], dt, this.fishMotionScratch);
       fish.velocity.copy(nextVelocities[i]);
       fish.position.copy(nextPositions[i]);
+      updateFishTrailHistory(fish);
     }
 
     this.elapsedTime += dt;
@@ -326,12 +320,8 @@ export class FishSchoolSimulation {
 
   isHeadingForCollision(position, forward) {
     return (
-      this.obstacles.length > 0
-      && this.rayHitsObstacle(
-        position,
-        forward,
-        this.settings.collisionAvoidDistance,
-      )
+      this.obstacles.length > 0 &&
+      this.rayHitsObstacle(position, forward, this.settings.collisionAvoidDistance)
     );
   }
 
@@ -339,13 +329,9 @@ export class FishSchoolSimulation {
     const cachedDirection = fish?.collisionAvoidanceDirection;
 
     if (
-      cachedDirection
-      && cachedDirection.dot(forward) > MIN_CACHED_CLEAR_DIRECTION_DOT
-      && this.isDirectionClear(
-        position,
-        cachedDirection,
-        this.settings.collisionAvoidDistance,
-      )
+      cachedDirection &&
+      cachedDirection.dot(forward) > MIN_CACHED_CLEAR_DIRECTION_DOT &&
+      this.isDirectionClear(position, cachedDirection, this.settings.collisionAvoidDistance)
     ) {
       return cachedDirection;
     }
@@ -368,10 +354,7 @@ export class FishSchoolSimulation {
     this.tmpQuat.setFromUnitVectors(this.forwardAxis, forwardDirection);
 
     for (const localDirection of this.rayDirections) {
-      const direction = this.tmpVecA
-        .copy(localDirection)
-        .applyQuaternion(this.tmpQuat)
-        .normalize();
+      const direction = this.tmpVecA.copy(localDirection).applyQuaternion(this.tmpQuat).normalize();
 
       if (this.isDirectionClear(position, direction, maxDistance)) {
         return {
@@ -386,10 +369,7 @@ export class FishSchoolSimulation {
   }
 
   isDirectionClear(origin, direction, maxDistance) {
-    return (
-      this.obstacles.length === 0
-      || !this.rayHitsObstacle(origin, direction, maxDistance)
-    );
+    return this.obstacles.length === 0 || !this.rayHitsObstacle(origin, direction, maxDistance);
   }
 
   rayHitsObstacle(origin, direction, maxDistance) {
@@ -440,14 +420,7 @@ export class FishSchoolSimulation {
     const halfY = obstacle.size.y * 0.5 + inset;
     const halfZ = obstacle.size.z * 0.5 + inset;
 
-    return rayExpandedBoxHitDistance(
-      localOrigin,
-      localDirection,
-      halfX,
-      halfY,
-      halfZ,
-      maxDistance,
-    );
+    return rayExpandedBoxHitDistance(localOrigin, localDirection, halfX, halfY, halfZ, maxDistance);
   }
 
   raySphereObstacleHitDistance(origin, direction, maxDistance, obstacle) {
@@ -568,11 +541,13 @@ export class FishSchoolSimulation {
 
   readFlowAxis(time) {
     const speed = this.settings.toroidalAxisSpeed ?? 0.42;
-    return this.flowAxis.set(
-      Math.sin(time * speed * 0.83) * 0.62,
-      1 + Math.sin(time * speed * 0.47) * 0.22,
-      Math.cos(time * speed) * 0.62,
-    ).normalize();
+    return this.flowAxis
+      .set(
+        Math.sin(time * speed * 0.83) * 0.62,
+        1 + Math.sin(time * speed * 0.47) * 0.22,
+        Math.cos(time * speed) * 0.62,
+      )
+      .normalize();
   }
 }
 

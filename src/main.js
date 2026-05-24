@@ -16,12 +16,7 @@ import {
 } from "./fish-renderer.js";
 import { createGlobalMotionBlurRenderer } from "./global-motion-blur.js";
 import { createHeadingDebugger } from "./heading-debugger.js";
-import {
-  addLighting,
-  addObstacles,
-  createRenderer,
-  createScene,
-} from "./scene-setup.js";
+import { addLighting, addObstacles, createRenderer, createScene } from "./scene-setup.js";
 
 const RENDER_FPS = 30;
 const STEP_FRAME_SECONDS = 1 / RENDER_FPS;
@@ -80,11 +75,21 @@ const controls = {
   centering: createControl("#centering", "#centering-value"),
   swirl: createControl("#swirl", "#swirl-value"),
   count: createControl("#count", "#count-value"),
+  trailLength: createControl("#trail-length", "#trail-length-value"),
   turnRate: createControl("#turn-rate", "#turn-rate-value"),
   motionBlurIntensity: createControl("#motion-blur-intensity", "#motion-blur-intensity-value"),
+  bloomStrength: createControl("#bloom-strength", "#bloom-strength-value"),
+  bloomRadius: createControl("#bloom-radius", "#bloom-radius-value"),
+  bloomThreshold: createControl("#bloom-threshold", "#bloom-threshold-value"),
 };
 
-const renderAppearanceControlKeys = new Set(["motionBlurIntensity"]);
+const trailAppearanceControlKeys = new Set(["trailLength"]);
+const renderAppearanceControlKeys = new Set([
+  "motionBlurIntensity",
+  "bloomStrength",
+  "bloomRadius",
+  "bloomThreshold",
+]);
 
 const simulationControlSettings = {
   separation: "separateWeight",
@@ -191,10 +196,16 @@ function readPanelParameterSnapshot() {
       centering: readRoundedControlValue("centering"),
       swirl: readRoundedControlValue("swirl"),
       count: readRoundedControlValue("count"),
+      trailLength: readRoundedControlValue("trailLength"),
       turnRate: readRoundedControlValue("turnRate"),
     },
     render: {
       motionBlurIntensity: readRoundedControlValue("motionBlurIntensity"),
+      bloom: {
+        strength: readRoundedControlValue("bloomStrength"),
+        radius: readRoundedControlValue("bloomRadius"),
+        threshold: readRoundedControlValue("bloomThreshold"),
+      },
     },
   };
 }
@@ -360,21 +371,9 @@ function moveSphereObstacleTo({ obstacle, mesh }, position) {
   const movementBounds = readObstacleMovementBounds(obstacle, radius);
 
   obstacle.position.set(
-    THREE.MathUtils.clamp(
-      position.x,
-      movementBounds.min.x,
-      movementBounds.max.x,
-    ),
-    THREE.MathUtils.clamp(
-      position.y,
-      movementBounds.min.y,
-      movementBounds.max.y,
-    ),
-    THREE.MathUtils.clamp(
-      position.z,
-      movementBounds.min.z,
-      movementBounds.max.z,
-    ),
+    THREE.MathUtils.clamp(position.x, movementBounds.min.x, movementBounds.max.x),
+    THREE.MathUtils.clamp(position.y, movementBounds.min.y, movementBounds.max.y),
+    THREE.MathUtils.clamp(position.z, movementBounds.min.z, movementBounds.max.z),
   );
   mesh.position.copy(obstacle.position);
   renderCurrentFrame();
@@ -443,6 +442,12 @@ function applyControlChange(key) {
     return;
   }
 
+  if (trailAppearanceControlKeys.has(key)) {
+    applyTrailAppearanceFromControls({ resetHistory: true });
+    renderCurrentFrame();
+    return;
+  }
+
   if (renderAppearanceControlKeys.has(key)) {
     applyRenderAppearanceFromControls();
     renderCurrentFrame();
@@ -459,12 +464,37 @@ function applySimulationSettingsFromControls() {
 }
 
 function syncRenderAppearanceControlsFromConfig() {
+  setControlValue("trailLength", fishConfig.ribbonLength ?? 0);
   setControlValue("motionBlurIntensity", renderSettings.motionBlurIntensity ?? 0);
+  setControlValue("bloomStrength", renderSettings.bloom?.strength ?? 0);
+  setControlValue("bloomRadius", renderSettings.bloom?.radius ?? 0);
+  setControlValue("bloomThreshold", renderSettings.bloom?.threshold ?? 0);
 }
 
 function applyRenderAppearanceFromControls() {
   renderSettings.motionBlurIntensity = readControlValue("motionBlurIntensity");
+  renderSettings.bloom = {
+    ...(renderSettings.bloom ?? {}),
+    strength: readControlValue("bloomStrength"),
+    radius: readControlValue("bloomRadius"),
+    threshold: readControlValue("bloomThreshold"),
+  };
   globalMotionBlur.reset();
+}
+
+function applyTrailAppearanceFromControls({ resetHistory = false } = {}) {
+  const nextLength = readControlValue("trailLength");
+  const changed = Math.abs(nextLength - fishConfig.ribbonLength) > 0.0001;
+  fishConfig.ribbonLength = nextLength;
+
+  if (!changed || !resetHistory) {
+    return;
+  }
+
+  simulation.resetTrailHistories();
+  if (fishMesh) {
+    updateFishInstances(fishMesh, simulation.fish);
+  }
 }
 
 function setFishCount(count) {
