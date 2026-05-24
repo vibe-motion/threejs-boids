@@ -15,7 +15,7 @@ export const fishConfig = {
   arrowRadius: 0.16,
   arrowRadialSegments: 9,
   arrowHeightSegments: 4,
-  ribbonLength: 9.75,
+  ribbonLength: 3.5,
   ribbonHeadWidth: 0.16,
   ribbonTailWidth: 0.012,
   ribbonSegments: 108,
