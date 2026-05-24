@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 const obstacleOutlineScale = new THREE.Vector3(1.04, 1.04, 1.04);
-const sceneBackgroundColor = new THREE.Color(0x3f576a);
+const sceneBackgroundColor = new THREE.Color(0x000000);
 const defaultObstacleBodyColor = new THREE.Color(0xffffff);
 const defaultObstacleOutlineColor = new THREE.Color(0x101010);
 
